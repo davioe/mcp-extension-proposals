@@ -1,0 +1,163 @@
+{
+  "manifest_version": "0.1.0",
+  "server": {
+    "name": "github-mcp-server",
+    "version": "3.1.0",
+    "mcp_spec_version": "2026-01-01",
+    "description": "MCP server for GitHub — repositories, issues, pull requests, and actions.",
+    "homepage": "https://github.com/example/github-mcp-server"
+  },
+  "auth": {
+    "methods": ["oauth2_device", "bearer_token"],
+    "scopes": [
+      { "name": "read:repos", "description": "List and read repository metadata", "grants": ["list_repos", "get_repo"] },
+      { "name": "read:code", "description": "Read file contents and diffs", "grants": ["get_file", "get_diff", "search_code"] },
+      { "name": "write:code", "description": "Create/edit files and branches", "grants": ["create_branch", "commit_file"] },
+      { "name": "read:issues", "description": "Read issues and comments", "grants": ["search_issues", "get_issue", "list_comments"] },
+      { "name": "write:issues", "description": "Create and edit issues", "grants": ["create_issue", "update_issue", "add_comment"] },
+      { "name": "read:prs", "description": "Read pull requests", "grants": ["list_prs", "get_pr", "get_pr_diff"] },
+      { "name": "write:prs", "description": "Create and merge pull requests", "grants": ["create_pr", "merge_pr", "request_review"] },
+      { "name": "admin:repo", "description": "Repository administration (settings, delete)", "grants": ["update_settings", "delete_repo"] }
+    ],
+    "session_ttl_seconds": 3600
+  },
+  "tools": [
+    {
+      "name": "search_issues",
+      "description": "Search GitHub issues across repositories.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "repo": { "type": "string", "description": "owner/repo format" },
+          "state": { "type": "string", "enum": ["open", "closed", "all"] },
+          "labels": { "type": "array", "items": { "type": "string" } },
+          "assignee": { "type": "string" },
+          "per_page": { "type": "integer", "default": 30, "maximum": 100 }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:issues"],
+      "supports_pagination": true
+    },
+    {
+      "name": "create_pr",
+      "description": "Create a pull request.",
+      "input_schema": {
+        "type": "object",
+        "required": ["repo", "title", "head", "base"],
+        "properties": {
+          "repo": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "head": { "type": "string", "description": "Branch with changes" },
+          "base": { "type": "string", "description": "Target branch" },
+          "draft": { "type": "boolean", "default": false },
+          "reviewers": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "seconds",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "reversible",
+      "required_scopes": ["write:prs"]
+    },
+    {
+      "name": "merge_pr",
+      "description": "Merge a pull request. This modifies the target branch permanently.",
+      "input_schema": {
+        "type": "object",
+        "required": ["repo", "pr_number"],
+        "properties": {
+          "repo": { "type": "string" },
+          "pr_number": { "type": "integer" },
+          "merge_method": { "type": "string", "enum": ["merge", "squash", "rebase"], "default": "squash" },
+          "commit_message": { "type": "string" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "seconds",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "This will merge the PR into the target branch. This action modifies the branch history. Proceed?",
+      "risk_level": "reversible",
+      "required_scopes": ["write:prs"]
+    },
+    {
+      "name": "delete_repo",
+      "description": "Permanently delete a GitHub repository and all its contents.",
+      "input_schema": {
+        "type": "object",
+        "required": ["repo"],
+        "properties": {
+          "repo": { "type": "string", "description": "owner/repo format" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "seconds",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "⚠️ This will PERMANENTLY DELETE the repository, all issues, PRs, actions, and release artifacts. This CANNOT be undone.",
+      "risk_level": "destructive",
+      "required_scopes": ["admin:repo"]
+    },
+    {
+      "name": "search_code",
+      "description": "Search code across repositories. Returns matching files with context.",
+      "input_schema": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string" },
+          "repo": { "type": "string" },
+          "language": { "type": "string" },
+          "path": { "type": "string", "description": "Filter by file path pattern" }
+        }
+      },
+      "cost": { "category": "metered", "estimated_units": 1, "unit_label": "search API calls" },
+      "latency": "seconds",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:code"],
+      "supports_streaming": true,
+      "supports_pagination": true
+    }
+  ],
+  "supported_extensions": [
+    "streaming",
+    "progress_notifications",
+    "idempotency",
+    "session_state",
+    "intent_hints",
+    "provenance",
+    "human_in_the_loop"
+  ],
+  "rate_limits": {
+    "requests_per_minute": 30,
+    "requests_per_day": 5000,
+    "remaining": 4892,
+    "resets_at": "2026-03-15T18:00:00Z"
+  },
+  "recommendations": [
+    {
+      "capability": "ci_cd_monitoring",
+      "server_name": "github-actions-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/github-actions",
+      "auth_flow": "oauth2_device",
+      "match_confidence": "high"
+    },
+    {
+      "capability": "project_management",
+      "server_name": "github-projects-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/github-projects",
+      "auth_flow": "oauth2_device",
+      "match_confidence": "high"
+    }
+  ]
+}

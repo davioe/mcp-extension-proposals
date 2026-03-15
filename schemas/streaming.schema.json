@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/streaming.json",
+  "title": "MCP Streaming and Progress",
+  "description": "Schemas for progress notifications, streaming partial results, and checkpoint-based resumption.",
+  "type": "object",
+  "$defs": {
+    "ProgressNotification": {
+      "title": "Progress Notification",
+      "description": "Sent by the server during long-running operations to communicate progress.",
+      "type": "object",
+      "required": ["type", "operation_id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "progress"
+        },
+        "operation_id": {
+          "type": "string",
+          "description": "Unique identifier for the operation, matching the original request."
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Completion fraction (0.0 to 1.0). Omit if progress is indeterminate."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable status message.",
+          "examples": ["Processing row 6,000 of 10,000", "Indexing documents..."]
+        },
+        "estimated_remaining_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Estimated time to completion. Omit if unknown."
+        },
+        "partial_result": {
+          "type": "object",
+          "description": "Optional intermediate result. The client can begin presenting this data before the operation completes."
+        },
+        "checkpoint_token": {
+          "type": "string",
+          "description": "Opaque token that can be passed to resume this operation if interrupted."
+        }
+      }
+    },
+    "StreamChunk": {
+      "title": "Stream Chunk",
+      "description": "A single chunk in a streaming response.",
+      "type": "object",
+      "required": ["type", "operation_id", "sequence"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "stream_chunk"
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonically increasing sequence number for ordering."
+        },
+        "data": {
+          "description": "The chunk payload. Schema depends on the tool."
+        },
+        "is_final": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this is the last chunk in the stream."
+        },
+        "checkpoint_token": {
+          "type": "string",
+          "description": "Resume token valid after this chunk."
+        }
+      }
+    },
+    "ResumeRequest": {
+      "title": "Resume Request",
+      "description": "Resume an interrupted operation from a checkpoint.",
+      "type": "object",
+      "required": ["operation_id", "checkpoint_token"],
+      "properties": {
+        "operation_id": {
+          "type": "string"
+        },
+        "checkpoint_token": {
+          "type": "string",
+          "description": "Token received from the last progress notification or stream chunk before interruption."
+        }
+      }
+    }
+  }
+}

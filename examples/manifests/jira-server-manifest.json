@@ -1,0 +1,177 @@
+{
+  "manifest_version": "0.1.0",
+  "server": {
+    "name": "jira-mcp-server",
+    "version": "2.3.1",
+    "mcp_spec_version": "2026-01-01",
+    "description": "MCP server for Atlassian Jira — issue tracking, sprint management, and project analytics.",
+    "homepage": "https://github.com/example/jira-mcp-server"
+  },
+  "auth": {
+    "methods": ["oauth2_code"],
+    "scopes": [
+      { "name": "read:issues", "description": "View issues, comments, and attachments", "grants": ["search_issues", "get_issue", "get_comments"] },
+      { "name": "write:issues", "description": "Create and edit issues", "grants": ["create_issue", "update_issue", "add_comment"] },
+      { "name": "delete:issues", "description": "Delete issues permanently", "grants": ["delete_issue"] },
+      { "name": "read:sprints", "description": "View sprint data and boards", "grants": ["get_sprint", "list_sprints"] },
+      { "name": "write:sprints", "description": "Manage sprints and move issues between sprints", "grants": ["create_sprint", "move_to_sprint"] },
+      { "name": "read:analytics", "description": "Access project analytics and velocity data", "grants": ["get_velocity", "get_burndown", "export_analytics"] },
+      { "name": "admin:project", "description": "Full project administration", "grants": ["delete_project", "manage_members"] }
+    ],
+    "session_ttl_seconds": 3600
+  },
+  "tools": [
+    {
+      "name": "search_issues",
+      "description": "Search issues using JQL or natural language queries.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query — JQL or natural language" },
+          "project": { "type": "string", "description": "Project key (e.g., 'PROJ')" },
+          "status": { "type": "string", "enum": ["open", "in_progress", "in_review", "done", "closed"] },
+          "assignee": { "type": "string" },
+          "sprint": { "type": "string", "description": "Sprint name or ID" },
+          "max_results": { "type": "integer", "default": 25, "maximum": 100 },
+          "offset": { "type": "integer", "default": 0 }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "issues": { "type": "array", "items": { "$ref": "#/$defs/Issue" } },
+          "total_count": { "type": "integer" },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:issues"],
+      "supports_streaming": false,
+      "supports_pagination": true
+    },
+    {
+      "name": "create_issue",
+      "description": "Create a new Jira issue.",
+      "input_schema": {
+        "type": "object",
+        "required": ["project", "summary", "issue_type"],
+        "properties": {
+          "project": { "type": "string" },
+          "summary": { "type": "string" },
+          "description": { "type": "string" },
+          "issue_type": { "type": "string", "enum": ["bug", "task", "story", "epic"] },
+          "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "assignee": { "type": "string" },
+          "labels": { "type": "array", "items": { "type": "string" } },
+          "sprint": { "type": "string" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["write:issues"]
+    },
+    {
+      "name": "delete_issue",
+      "description": "Permanently delete a Jira issue and all its comments, attachments, and history.",
+      "input_schema": {
+        "type": "object",
+        "required": ["issue_key"],
+        "properties": {
+          "issue_key": { "type": "string", "description": "e.g., PROJ-123" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "This will permanently delete the issue, all comments, attachments, and change history. This cannot be undone. Proceed?",
+      "risk_level": "destructive",
+      "required_scopes": ["delete:issues"]
+    },
+    {
+      "name": "export_analytics",
+      "description": "Export project analytics data. Supports velocity charts, burndown data, and custom reports.",
+      "input_schema": {
+        "type": "object",
+        "required": ["project", "report_type"],
+        "properties": {
+          "project": { "type": "string" },
+          "report_type": { "type": "string", "enum": ["velocity", "burndown", "cumulative_flow", "cycle_time"] },
+          "date_range": {
+            "type": "object",
+            "properties": {
+              "from": { "type": "string", "format": "date" },
+              "to": { "type": "string", "format": "date" }
+            }
+          },
+          "format": { "type": "string", "enum": ["json", "csv"], "default": "json" }
+        }
+      },
+      "cost": { "category": "metered", "estimated_units": 5, "unit_label": "API credits" },
+      "latency": "seconds",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:analytics"],
+      "supports_streaming": true
+    },
+    {
+      "name": "delete_project",
+      "description": "Permanently delete an entire Jira project including all issues, sprints, and configuration.",
+      "input_schema": {
+        "type": "object",
+        "required": ["project_key", "confirmation_text"],
+        "properties": {
+          "project_key": { "type": "string" },
+          "confirmation_text": { "type": "string", "description": "Must be the exact project name to confirm deletion" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "minutes",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "⚠️ DANGER: This will permanently delete the ENTIRE project — all issues, sprints, boards, and configuration. This action CANNOT be undone. Type the project name to confirm.",
+      "risk_level": "destructive",
+      "required_scopes": ["admin:project"]
+    }
+  ],
+  "supported_extensions": [
+    "streaming",
+    "progress_notifications",
+    "idempotency",
+    "transactions",
+    "session_state",
+    "intent_hints",
+    "provenance",
+    "human_in_the_loop"
+  ],
+  "rate_limits": {
+    "requests_per_minute": 120,
+    "requests_per_day": 50000,
+    "remaining": 49842,
+    "resets_at": "2026-03-16T00:00:00Z"
+  },
+  "recommendations": [
+    {
+      "capability": "documentation_wiki",
+      "server_name": "confluence-mcp-server",
+      "registry_url": "https://mcp-registry.example.com/servers/confluence",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "high"
+    },
+    {
+      "capability": "ci_cd_pipelines",
+      "server_name": "bitbucket-pipelines-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/bitbucket-pipelines",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "medium"
+    }
+  ]
+}

@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/service-manifest.json",
+  "title": "MCP Service Manifest",
+  "description": "A standardized manifest that every MCP server exposes at connection time, describing its capabilities, tools, authentication, rate limits, and supported protocol extensions.",
+  "type": "object",
+  "required": ["manifest_version", "server", "tools"],
+  "properties": {
+    "manifest_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Version of the manifest schema itself."
+    },
+    "server": {
+      "type": "object",
+      "required": ["name", "version", "mcp_spec_version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable server name.",
+          "examples": ["jira-mcp-server", "github-mcp-server"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Server implementation version (semver).",
+          "pattern": "^\\d+\\.\\d+\\.\\d+",
+          "examples": ["1.4.2"]
+        },
+        "mcp_spec_version": {
+          "type": "string",
+          "description": "MCP specification version this server implements.",
+          "examples": ["2026-01-01"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of what this server provides."
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to the server's documentation or homepage."
+        }
+      }
+    },
+    "auth": {
+      "$ref": "#/$defs/AuthCapabilities"
+    },
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ToolDefinition" },
+      "description": "All tools this server exposes."
+    },
+    "supported_extensions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "streaming",
+          "progress_notifications",
+          "idempotency",
+          "transactions",
+          "session_state",
+          "intent_hints",
+          "provenance",
+          "human_in_the_loop",
+          "data_references",
+          "subscribe_notify",
+          "server_recommendations"
+        ]
+      },
+      "description": "Which optional MCP extensions this server supports."
+    },
+    "rate_limits": {
+      "$ref": "#/$defs/RateLimits"
+    },
+    "recommendations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ServerRecommendation" },
+      "description": "Other MCP servers this server recommends for related capabilities."
+    }
+  },
+  "$defs": {
+    "ToolDefinition": {
+      "type": "object",
+      "required": ["name", "description", "input_schema"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Tool identifier, unique within this server.",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "examples": ["search_issues", "create_ticket", "export_analytics"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this tool does."
+        },
+        "input_schema": {
+          "type": "object",
+          "description": "JSON Schema defining the tool's input parameters."
+        },
+        "output_schema": {
+          "type": "object",
+          "description": "JSON Schema defining the tool's output structure."
+        },
+        "input_types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Accepted MIME types for binary input (multimodal tools).",
+          "examples": [["image/png", "image/jpeg", "application/pdf"]]
+        },
+        "output_types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "MIME types this tool can return.",
+          "examples": [["application/json", "image/png"]]
+        },
+        "max_input_size_bytes": {
+          "type": "integer",
+          "description": "Maximum input payload size in bytes."
+        },
+        "cost": {
+          "$ref": "#/$defs/CostInfo"
+        },
+        "latency": {
+          "type": "string",
+          "enum": ["instant", "seconds", "minutes"],
+          "description": "Expected latency class for this tool."
+        },
+        "idempotent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this tool naturally produces the same result for identical inputs."
+        },
+        "requires_confirmation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the client MUST obtain user approval before executing."
+        },
+        "confirmation_message": {
+          "type": "string",
+          "description": "Message to show the user when confirmation is required."
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": ["safe", "reversible", "destructive"],
+          "default": "safe",
+          "description": "Impact level of this operation."
+        },
+        "required_scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Auth scopes needed to call this tool.",
+          "examples": [["read:issues", "write:issues"]]
+        },
+        "supports_streaming": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this tool can stream partial results."
+        },
+        "supports_pagination": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether results can be paginated."
+        }
+      }
+    },
+    "AuthCapabilities": {
+      "type": "object",
+      "properties": {
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["oauth2_device", "oauth2_code", "api_key", "bearer_token", "none"]
+          },
+          "description": "Supported authentication methods."
+        },
+        "scopes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ScopeDefinition" },
+          "description": "All available permission scopes."
+        },
+        "session_ttl_seconds": {
+          "type": "integer",
+          "description": "Session token lifetime in seconds. After this period of inactivity, re-authentication is required.",
+          "examples": [1800]
+        }
+      }
+    },
+    "ScopeDefinition": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Scope identifier.",
+          "examples": ["read:issues", "write:issues", "admin:repo"]
+        },
+        "description": {
+          "type": "string",
+          "description": "What this scope grants access to."
+        },
+        "grants": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Which tools this scope unlocks."
+        }
+      }
+    },
+    "CostInfo": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": ["free", "metered", "requires_approval"],
+          "description": "Cost classification."
+        },
+        "estimated_units": {
+          "type": "number",
+          "description": "Estimated unit consumption per call."
+        },
+        "unit_label": {
+          "type": "string",
+          "description": "Human-readable label for the unit.",
+          "examples": ["API calls", "credits", "compute seconds"]
+        }
+      }
+    },
+    "RateLimits": {
+      "type": "object",
+      "properties": {
+        "requests_per_minute": {
+          "type": "integer"
+        },
+        "requests_per_day": {
+          "type": "integer"
+        },
+        "remaining": {
+          "type": "integer",
+          "description": "Remaining requests in the current window."
+        },
+        "resets_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the current rate limit window resets."
+        }
+      }
+    },
+    "ServerRecommendation": {
+      "type": "object",
+      "required": ["capability", "server_name"],
+      "properties": {
+        "capability": {
+          "type": "string",
+          "description": "The capability this recommendation addresses.",
+          "examples": ["design_mockup", "analytics_export"]
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "registry_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "auth_flow": {
+          "type": "string"
+        },
+        "match_confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        }
+      }
+    }
+  }
+}

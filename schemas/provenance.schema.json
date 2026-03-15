@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/provenance.json",
+  "title": "MCP Provenance",
+  "description": "Structured source attribution for tool responses, enabling clients to provide verifiable citations.",
+  "type": "object",
+  "$defs": {
+    "Provenance": {
+      "title": "Provenance",
+      "description": "Attached to any data point in a tool response to indicate its origin.",
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Identifier for the source document, database, API, or system.",
+          "examples": ["invoice_v2.pdf", "postgresql:analytics.revenue", "github:api/v3/issues"]
+        },
+        "location": {
+          "type": "object",
+          "description": "Where within the source the data was found.",
+          "properties": {
+            "page": { "type": "integer" },
+            "paragraph": { "type": "integer" },
+            "line": { "type": "integer" },
+            "cell": { "type": "string", "examples": ["B14"] },
+            "json_path": { "type": "string", "examples": ["$.data.revenue.q3"] },
+            "url_fragment": { "type": "string" }
+          }
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this data was retrieved from the source."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version or revision of the source document.",
+          "examples": ["v2.1", "commit:a1b2c3d", "2026-03-10"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["exact", "derived", "estimated", "uncertain"],
+          "description": "'exact' = literal value from source; 'derived' = computed from source data; 'estimated' = approximation; 'uncertain' = low confidence."
+        },
+        "transformation": {
+          "type": "string",
+          "description": "If the value was derived or transformed, describe how.",
+          "examples": ["SUM of rows 2-15 in column B", "Currency converted from EUR to USD at 1.08"]
+        }
+      }
+    },
+    "ProvenanceWrapper": {
+      "title": "Provenance Wrapper",
+      "description": "Wraps a tool response with provenance metadata.",
+      "type": "object",
+      "required": ["result"],
+      "properties": {
+        "result": {
+          "description": "The actual tool response payload."
+        },
+        "provenance": {
+          "oneOf": [
+            { "$ref": "#/$defs/Provenance" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Provenance" },
+              "description": "Multiple provenance records when the result aggregates data from several sources."
+            }
+          ]
+        }
+      }
+    }
+  }
+}

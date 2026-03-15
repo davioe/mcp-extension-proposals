@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/error.json",
+  "title": "MCP Structured Error",
+  "description": "A standardized error response format that enables clients to react intelligently — retry, inform the user, or try an alternative approach.",
+  "type": "object",
+  "required": ["code", "message", "category"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "Machine-readable error code. Use UPPER_SNAKE_CASE.",
+      "examples": [
+        "RATE_LIMIT_EXCEEDED",
+        "PERMISSION_DENIED",
+        "RESOURCE_NOT_FOUND",
+        "INVALID_INPUT",
+        "QUOTA_EXHAUSTED",
+        "SERVER_UNAVAILABLE",
+        "TRANSACTION_CONFLICT",
+        "AUTHENTICATION_REQUIRED",
+        "SCOPE_INSUFFICIENT",
+        "OPERATION_TIMEOUT",
+        "PAYLOAD_TOO_LARGE",
+        "IDEMPOTENCY_CONFLICT"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable error description. Should be specific enough to be useful, not generic."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["transient", "permanent", "auth_required", "invalid_input", "rate_limited"],
+      "description": "Error classification that drives client behavior: 'transient' = retry may succeed; 'permanent' = do not retry; 'auth_required' = re-authenticate; 'invalid_input' = fix parameters; 'rate_limited' = wait and retry."
+    },
+    "retry_after_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Seconds to wait before retrying. Only meaningful for 'transient' and 'rate_limited' categories."
+    },
+    "user_actionable": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this error should be surfaced to the user. If false, the client should handle it silently (e.g., automatic retry)."
+    },
+    "suggestion": {
+      "type": "string",
+      "description": "A concrete next step the client or user can take to resolve the issue.",
+      "examples": [
+        "Narrow the date range to reduce query cost.",
+        "Request the 'write:issues' scope to perform this operation.",
+        "The resource was moved — use ID 'PROJ-456' instead."
+      ]
+    },
+    "details": {
+      "type": "object",
+      "description": "Additional structured context. Schema varies by error code.",
+      "examples": [
+        {
+          "required_scope": "write:issues",
+          "current_scopes": ["read:issues"]
+        },
+        {
+          "field": "date_range",
+          "constraint": "max 90 days",
+          "provided": "365 days"
+        }
+      ]
+    },
+    "documentation_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Link to documentation explaining this error in detail."
+    }
+  }
+}

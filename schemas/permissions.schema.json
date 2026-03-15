@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/permissions.json",
+  "title": "MCP Permission Model",
+  "description": "Schemas for permission checks, scope negotiation, and session token management.",
+  "type": "object",
+  "$defs": {
+    "PermissionCheckRequest": {
+      "title": "Permission Check Request",
+      "description": "Pre-flight check: can I execute this tool with these parameters?",
+      "type": "object",
+      "required": ["tool", "scopes_held"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Tool name to check permissions for."
+        },
+        "scopes_held": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scopes the client currently holds."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Optional: the specific parameters intended. Some tools may have parameter-dependent permissions (e.g., read own issues vs. read all issues)."
+        }
+      }
+    },
+    "PermissionCheckResponse": {
+      "title": "Permission Check Response",
+      "description": "Server response indicating whether the operation is permitted.",
+      "type": "object",
+      "required": ["allowed"],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "missing_scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scopes that need to be granted for this operation to succeed."
+        },
+        "elevation_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL the user can visit to grant the missing scopes."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable explanation of why the operation is denied."
+        }
+      }
+    },
+    "SessionToken": {
+      "title": "Session Token",
+      "description": "A scoped, time-limited session returned after authentication.",
+      "type": "object",
+      "required": ["token", "scopes", "expires_at"],
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Opaque session token. Passed in subsequent requests via X-MCP-Session-Token header."
+        },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scopes granted for this session."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this session token expires."
+        },
+        "refresh_token": {
+          "type": "string",
+          "description": "Optional token that can be used to extend the session without re-authentication."
+        },
+        "inactivity_timeout_seconds": {
+          "type": "integer",
+          "description": "Session expires after this many seconds of inactivity, even if expires_at has not been reached."
+        }
+      }
+    },
+    "ScopeNegotiationRequest": {
+      "title": "Scope Negotiation Request",
+      "description": "Client requests specific scopes during the MCP handshake.",
+      "type": "object",
+      "required": ["requested_scopes"],
+      "properties": {
+        "requested_scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scopes the client would like to have."
+        },
+        "justification": {
+          "type": "string",
+          "description": "Optional human-readable reason for the request, displayed to the user during consent."
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "description": "Requested session duration. Server may grant a shorter duration."
+        }
+      }
+    },
+    "ScopeNegotiationResponse": {
+      "title": "Scope Negotiation Response",
+      "description": "Server response indicating which scopes were granted.",
+      "type": "object",
+      "required": ["granted_scopes", "session"],
+      "properties": {
+        "granted_scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Scopes actually granted (may be a subset of requested)."
+        },
+        "denied_scopes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scope": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          },
+          "description": "Scopes that were denied, with reasons."
+        },
+        "session": {
+          "$ref": "#/$defs/SessionToken"
+        }
+      }
+    }
+  }
+}

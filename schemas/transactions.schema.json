@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/transactions.json",
+  "title": "MCP Transactions and Idempotency",
+  "description": "Schemas for idempotency keys, transaction lifecycle, and compensation-based rollback.",
+  "type": "object",
+  "$defs": {
+    "IdempotentRequest": {
+      "title": "Idempotent Request",
+      "description": "Any state-changing tool call can include an idempotency key. The server MUST return the same result for repeated calls with the same key.",
+      "type": "object",
+      "required": ["idempotency_key"],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "description": "Client-generated unique key for this operation. Recommended format: UUID v4 or '{context}-{timestamp}-{random}'.",
+          "pattern": "^[a-zA-Z0-9_\\-:.]{1,128}$",
+          "examples": ["op-2026-03-15-a1b2c3d4", "550e8400-e29b-41d4-a716-446655440000"]
+        },
+        "idempotency_ttl_seconds": {
+          "type": "integer",
+          "default": 86400,
+          "description": "How long the server should remember this key. Default: 24 hours."
+        }
+      }
+    },
+    "IdempotencyResponse": {
+      "title": "Idempotency Response Metadata",
+      "description": "Included in the response when an idempotency key was provided.",
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "was_replay": {
+          "type": "boolean",
+          "description": "True if this response is a replay of a previously executed operation."
+        },
+        "original_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the operation was originally executed (relevant if was_replay is true)."
+        }
+      }
+    },
+    "TransactionBegin": {
+      "title": "Begin Transaction",
+      "description": "Opens a transaction context. Subsequent tool calls can reference this transaction ID.",
+      "type": "object",
+      "required": ["transaction_id"],
+      "properties": {
+        "transaction_id": {
+          "type": "string",
+          "description": "Client-generated transaction identifier.",
+          "examples": ["tx-2026-03-15-migration-001"]
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "description": "Transaction auto-rolls-back after this many seconds without activity."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this transaction does.",
+          "examples": ["Create ticket, link to doc, and notify team"]
+        }
+      }
+    },
+    "TransactionStep": {
+      "title": "Transaction Step",
+      "description": "A single operation within a transaction. The server registers a compensation action for rollback.",
+      "type": "object",
+      "required": ["transaction_id", "step_id", "tool", "parameters"],
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string",
+          "description": "Unique step identifier within this transaction.",
+          "examples": ["step-1-create-ticket"]
+        },
+        "tool": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "TransactionStepResult": {
+      "title": "Transaction Step Result",
+      "description": "Server response for a transaction step, including the registered compensation action.",
+      "type": "object",
+      "required": ["step_id", "status"],
+      "properties": {
+        "step_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed"]
+        },
+        "result": {
+          "type": "object",
+          "description": "The tool's normal response payload."
+        },
+        "compensation": {
+          "type": "object",
+          "description": "The action the server will execute on rollback.",
+          "properties": {
+            "tool": { "type": "string" },
+            "parameters": { "type": "object" },
+            "description": { "type": "string" }
+          },
+          "examples": [
+            {
+              "tool": "delete_ticket",
+              "parameters": { "ticket_id": "PROJ-123" },
+              "description": "Delete the ticket created in this step"
+            }
+          ]
+        },
+        "error": {
+          "$ref": "error.json",
+          "description": "Structured error if status is 'failed'."
+        }
+      }
+    },
+    "TransactionCommit": {
+      "title": "Commit Transaction",
+      "type": "object",
+      "required": ["transaction_id"],
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        }
+      }
+    },
+    "TransactionRollback": {
+      "title": "Rollback Transaction",
+      "type": "object",
+      "required": ["transaction_id"],
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the transaction is being rolled back."
+        }
+      }
+    },
+    "TransactionRollbackResult": {
+      "title": "Rollback Result",
+      "type": "object",
+      "required": ["transaction_id", "steps_compensated"],
+      "properties": {
+        "transaction_id": {
+          "type": "string"
+        },
+        "steps_compensated": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step_id": { "type": "string" },
+              "status": { "type": "string", "enum": ["compensated", "compensation_failed"] },
+              "error": { "type": "object" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
