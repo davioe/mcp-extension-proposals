@@ -83,6 +83,7 @@ const tickets: Map<string, Ticket> = new Map([
   ["PROJ-2", { id: "PROJ-2", title: "Add dark mode", status: "in_progress", assignee: "bob", created_at: new Date().toISOString() }],
   ["PROJ-3", { id: "PROJ-3", title: "Update dependencies", status: "closed", assignee: "alice", created_at: new Date().toISOString() }],
 ]);
+let ticketCounter = tickets.size; // Monotonic counter — never decreases, even after deletes
 
 // =============================================================================
 // Extension 1: Service Manifest
@@ -222,6 +223,14 @@ class PermissionChecker {
     }
     return { allowed: true };
   }
+
+  addScope(scope: string): void {
+    this.grantedScopes.add(scope);
+  }
+
+  removeScope(scope: string): void {
+    this.grantedScopes.delete(scope);
+  }
 }
 
 // =============================================================================
@@ -342,6 +351,11 @@ function withProvenance<T>(result: T, source: string, confidence: Provenance["co
 // Extension 14: Session State
 // =============================================================================
 
+/**
+ * SECURITY NOTE: This reference implementation uses plain Base64 encoding for
+ * clarity. Production implementations MUST use signed tokens (e.g., HMAC-SHA256)
+ * or encrypted tokens (e.g., AES-GCM) to prevent client-side tampering.
+ */
 const SessionState = {
   encode: (state: Record<string, unknown>): string => Buffer.from(JSON.stringify(state)).toString("base64"),
   decode: (token: string): Record<string, unknown> => JSON.parse(Buffer.from(token, "base64").toString("utf-8")),
@@ -394,7 +408,8 @@ function handleCreateTicket(params: Record<string, string>, idempotencyKey?: str
     }
   }
 
-  const ticketId = `PROJ-${tickets.size + 1}`;
+  ticketCounter++;
+  const ticketId = `PROJ-${ticketCounter}`;
   const ticket: Ticket = {
     id: ticketId,
     title: params.title,
@@ -500,7 +515,22 @@ interface MCPRequest {
   user_confirmed?: boolean;
 }
 
-async function handleRequest(request: MCPRequest): Promise<Record<string, unknown>> {
+// Response type helpers for the demo
+interface ConfirmationResponse {
+  requires_confirmation: boolean;
+  confirmation_message: string;
+  risk_level: string;
+  [key: string]: unknown;
+}
+
+interface DeleteResponse {
+  deleted?: boolean;
+  ticket_id?: string;
+  session_state?: string;
+  [key: string]: unknown;
+}
+
+async function handleRequest(request: MCPRequest): Promise<Record<string, unknown> & { idempotency?: { was_replay: boolean }; suggestion?: Record<string, unknown> }> {
   const { tool, parameters = {}, intent, idempotency_key, transaction_id, session_state, user_confirmed } = request;
 
   // Extension 14: Decode session state
@@ -536,7 +566,7 @@ async function handleRequest(request: MCPRequest): Promise<Record<string, unknow
   if (toolDef?.requires_confirmation && !user_confirmed) {
     return {
       requires_confirmation: true,
-      confirmation_message: (toolDef as any).confirmation_message ?? "Are you sure?",
+      confirmation_message: ("confirmation_message" in toolDef ? toolDef.confirmation_message : "Are you sure?"),
       risk_level: toolDef.risk_level,
       tool,
       parameters,
@@ -586,9 +616,9 @@ async function demo() {
   // 1. Service Manifest
   log("1. Service Manifest (Proposal #1)");
   const manifest = await handleRequest({ tool: "get_manifest" });
-  const srv = manifest as any;
+  const srv = manifest.server as { name: string; version: string };
   console.log(`Server: ${srv.name} v${srv.version}`);
-  console.log(`Extensions: ${(srv.supported_extensions as string[])?.join(", ")}`);
+  console.log(`Extensions: ${(manifest.supported_extensions as readonly string[]).join(", ")}`);
 
   // 2. Permission Check
   log("2. Permission Check (Proposal #4)");
@@ -602,13 +632,14 @@ async function demo() {
     parameters: { query: "bug" },
     intent: "Find the most recent incident from last Friday's deployment",
   });
-  console.log("Suggestion:", (intentResult as any).suggestion);
+  console.log("Suggestion:", intentResult.suggestion);
 
   // 4. Provenance
   log("4. Search with Provenance (Proposal #7)");
   const provResult = await handleRequest({ tool: "search_tickets", parameters: { status: "open" } });
-  console.log(`Found ${(provResult as any).result?.total_count} tickets`);
-  console.log("Provenance:", (provResult as any).provenance);
+  const provWrapped = provResult as unknown as ProvenanceWrapped<{ total_count: number }>;
+  console.log(`Found ${provWrapped.result?.total_count} tickets`);
+  console.log("Provenance:", provWrapped.provenance);
 
   // 5. Idempotency
   log("5. Idempotent Create (Proposal #5)");
@@ -618,30 +649,30 @@ async function demo() {
     parameters: { title: "Deploy v2.1", assignee: "charlie" },
     idempotency_key: idemKey,
   });
-  console.log(`First call — replay: ${(r1 as any).idempotency?.was_replay}`);
+  console.log(`First call — replay: ${r1.idempotency?.was_replay}`);
 
   const r2 = await handleRequest({
     tool: "create_ticket",
     parameters: { title: "Deploy v2.1", assignee: "charlie" },
     idempotency_key: idemKey,
   });
-  console.log(`Second call — replay: ${(r2 as any).idempotency?.was_replay}`);
+  console.log(`Second call — replay: ${r2.idempotency?.was_replay}`);
 
   // 6. Human-in-the-Loop
   log("6. Human-in-the-Loop (Proposal #6)");
   // Temporarily grant delete scope to demonstrate confirmation flow
-  (permissions as any).grantedScopes.add("delete:tickets");
+  permissions.addScope("delete:tickets");
 
-  const noConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" } });
-  console.log(`Requires confirmation: ${(noConfirm as any).requires_confirmation}`);
-  console.log(`Message: ${(noConfirm as any).confirmation_message}`);
-  console.log(`Risk level: ${(noConfirm as any).risk_level}`);
+  const noConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" } }) as unknown as ConfirmationResponse;
+  console.log(`Requires confirmation: ${noConfirm.requires_confirmation}`);
+  console.log(`Message: ${noConfirm.confirmation_message}`);
+  console.log(`Risk level: ${noConfirm.risk_level}`);
 
-  const withConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" }, user_confirmed: true });
-  console.log(`After confirmation: deleted=${(withConfirm as any).deleted}, ticket=${(withConfirm as any).ticket_id}`);
+  const withConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" }, user_confirmed: true }) as unknown as DeleteResponse;
+  console.log(`After confirmation: deleted=${withConfirm.deleted}, ticket=${withConfirm.ticket_id}`);
 
   // Revoke delete scope
-  (permissions as any).grantedScopes.delete("delete:tickets");
+  permissions.removeScope("delete:tickets");
 
   // 7. Transaction + Rollback
   log("7. Transaction with Rollback (Proposal #5)");
@@ -666,10 +697,10 @@ async function demo() {
 
   // 9. Structured Error (resource not found)
   log("9. Structured Error (Proposal #11)");
-  (permissions as any).grantedScopes.add("delete:tickets");
+  permissions.addScope("delete:tickets");
   const errorResult = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "NONEXISTENT" }, user_confirmed: true });
   console.log("Error:", JSON.stringify(errorResult, null, 2));
-  (permissions as any).grantedScopes.delete("delete:tickets");
+  permissions.removeScope("delete:tickets");
 
   // 10. Permission Denied Error
   log("10. Permission Denied (Proposals #4 + #11)");

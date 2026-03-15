@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/subscribe-notify.json",
+  "title": "MCP Subscribe/Notify",
+  "description": "Schemas for bidirectional context push — servers proactively notify clients of relevant events without polling.",
+  "type": "object",
+  "$defs": {
+    "SubscriptionRequest": {
+      "title": "Subscription Request",
+      "description": "Client subscribes to events from a server.",
+      "type": "object",
+      "required": ["events"],
+      "properties": {
+        "subscription_id": {
+          "type": "string",
+          "description": "Client-generated identifier for this subscription. Used for unsubscribe.",
+          "examples": ["sub-git-main-commits"]
+        },
+        "events": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Event types to subscribe to.",
+          "examples": [["commit_to_main", "pr_review_requested", "issue_updated"]]
+        },
+        "filter": {
+          "type": "object",
+          "description": "Optional filter to narrow which events are delivered.",
+          "examples": [
+            { "repository": "frontend-app" },
+            { "project": "PROJ", "assignee": "alice" }
+          ]
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "description": "Subscription auto-expires after this many seconds. Server may impose a maximum.",
+          "examples": [3600]
+        }
+      }
+    },
+    "SubscriptionResponse": {
+      "title": "Subscription Response",
+      "type": "object",
+      "required": ["subscription_id", "status"],
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "denied"]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the subscription will expire."
+        },
+        "supported_events": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "All event types this server supports. Returned so the client can discover available events."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Explanation if status is 'denied'."
+        }
+      }
+    },
+    "EventNotification": {
+      "title": "Event Notification",
+      "description": "Server pushes an event to the client.",
+      "type": "object",
+      "required": ["type", "subscription_id", "event", "timestamp"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "event"
+        },
+        "subscription_id": {
+          "type": "string",
+          "description": "Which subscription triggered this notification."
+        },
+        "event": {
+          "type": "string",
+          "description": "The event type that occurred.",
+          "examples": ["commit_to_main", "pr_review_requested"]
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "type": "object",
+          "description": "Event-specific data. Schema varies by event type."
+        },
+        "action_hint": {
+          "type": "object",
+          "description": "Optional suggestion for how the client might respond.",
+          "properties": {
+            "recommended_tool": { "type": "string" },
+            "parameters": { "type": "object" },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    },
+    "UnsubscribeRequest": {
+      "title": "Unsubscribe Request",
+      "type": "object",
+      "required": ["subscription_id"],
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

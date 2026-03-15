@@ -13,6 +13,8 @@ MCP is one of the most impactful ideas to emerge from the AI ecosystem in recent
 
 For single-step tool calls — "search Jira for issue X", "fetch the weather in Berlin" — MCP already works remarkably well. This proposal is about what happens when you move beyond single steps.
 
+> **Baseline:** This proposal is written against the [MCP specification as of 2025-03-26](https://spec.modelcontextprotocol.io/). Some features described here may overlap with newer spec revisions — contributions that track the latest spec are welcome.
+
 ## Where MCP Hits Its Limits
 
 In practice, real-world agent workflows are multi-step, data-intensive, and failure-prone. MCP's current design creates systematic friction in five areas. This proposal addresses each with concrete, backwards-compatible extensions.
@@ -376,12 +378,83 @@ All 15 proposals follow these constraints:
 - **Vendor-specific primitives** such as model-bound image generation flags, proprietary auth token formats, or platform-specific preference headers. MCP's strength is universality; fragmenting the core protocol with vendor extensions would undermine its foundational value.
 - **Overreach in scope.** MCP should remain a tool-integration protocol, not attempt to become a general-purpose agent framework. Orchestration logic, planning, and reasoning belong in the client, not the protocol.
 
-## Next Steps (TODO)
+## What's Included
 
-I would be happy to contribute to any of the following:
+This repository goes beyond the proposal text and includes concrete artifacts:
 
-- **A)** A JSON schema draft for the proposed `mcp-capabilities` service manifest
-- **B)** A reference implementation (Python or Node.js) demonstrating idempotency headers, streaming chunks, and the structured error model
-- **C)** A technical specification for how human-in-the-loop confirmation flows work within the MCP protocol
+- **JSON Schemas** (Draft-07) for 8 of the 15 proposals — see [`schemas/`](schemas/)
+- **Reference implementations** in Python and TypeScript demonstrating 10 of the 15 proposals — see [`examples/`](examples/)
+- **Realistic example manifests** for Jira and GitHub MCP servers — see [`examples/manifests/`](examples/manifests/)
+
+For full coverage details, see the [coverage matrix](examples/README.md#coverage-matrix).
+
+## Next Steps
+
+Areas where contributions would be most valuable:
+
+- **Conformance test suite** (Proposal #12) — even a minimal test runner that validates manifests against the schema
+- **Alignment with latest MCP spec** — tracking which proposals overlap with newer spec revisions
+- **Additional example manifests** for other real-world servers (Slack, Linear, Notion, etc.)
+- **Security review** of the session state and transaction models
 
 Feedback, counter-proposals, and prioritization input are welcome. The goal is to move MCP from "convenient data interface" to "robust orchestration protocol for AI agents" — and I believe these 15 extensions are the right next step.
+
+## Flows
+
+### Human-in-the-Loop Confirmation
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as MCP Server
+    participant U as User
+
+    C->>S: delete_ticket(id: "PROJ-42")
+    S-->>C: requires_confirmation: true<br/>risk_level: "destructive"<br/>message: "Permanently delete?"
+    C->>U: Show confirmation dialog
+    U-->>C: Approved
+    C->>S: delete_ticket(id: "PROJ-42", user_confirmed: true)
+    S-->>C: deleted: true
+```
+
+### Transaction with Rollback
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as MCP Server
+
+    C->>S: begin_transaction(tx-001)
+    S-->>C: status: begun
+
+    C->>S: create_ticket("Step 1") [tx-001]
+    S-->>C: ok, compensation: delete_ticket
+
+    C->>S: create_ticket("Step 2") [tx-001]
+    S-->>C: ok, compensation: delete_ticket
+
+    C->>S: link_document(...) [tx-001]
+    S-->>C: FAILED
+
+    C->>S: rollback_transaction(tx-001)
+    S->>S: compensate: delete Step 2
+    S->>S: compensate: delete Step 1
+    S-->>C: rolled_back, 2 steps compensated
+```
+
+### Capability Discovery and Permission Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as MCP Server
+
+    C->>S: get_manifest()
+    S-->>C: tools, scopes, extensions, rate_limits
+
+    C->>S: check_permissions(tool: "delete_ticket")
+    S-->>C: allowed: false, missing: ["delete:tickets"]
+
+    C->>S: negotiate_scopes(["read:tickets", "delete:tickets"])
+    S-->>C: granted: ["read:tickets"]<br/>denied: ["delete:tickets"] (admin required)
+```

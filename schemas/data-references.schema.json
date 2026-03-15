@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/data-references.json",
+  "title": "MCP Data References",
+  "description": "Schemas for passing opaque data references between servers, enabling direct server-to-server data transfer without routing through the client context.",
+  "type": "object",
+  "$defs": {
+    "DataReference": {
+      "title": "Data Reference",
+      "description": "An opaque handle to data produced by a server. Can be passed to another server for direct consumption.",
+      "type": "object",
+      "required": ["ref_id", "origin_server", "mime_type"],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "description": "Unique identifier for this data reference.",
+          "examples": ["ref-analysis-789", "ref-export-2026-03-15-abc"]
+        },
+        "origin_server": {
+          "type": "string",
+          "description": "Name of the MCP server that produced this reference."
+        },
+        "mime_type": {
+          "type": "string",
+          "description": "MIME type of the referenced data.",
+          "examples": ["application/json", "text/csv", "application/pdf"]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the referenced data in bytes, if known."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this reference becomes invalid."
+        },
+        "access_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Signed URL for direct access. Servers MAY use this for direct transfer."
+        },
+        "checksum": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "enum": ["sha256", "md5"],
+              "description": "Hash algorithm used."
+            },
+            "value": {
+              "type": "string",
+              "description": "Hex-encoded hash of the referenced data."
+            }
+          },
+          "description": "Integrity check for the referenced data."
+        }
+      }
+    },
+    "ImportFromRefRequest": {
+      "title": "Import From Reference",
+      "description": "Request to import data from a reference produced by another server.",
+      "type": "object",
+      "required": ["ref_id", "origin_server"],
+      "properties": {
+        "ref_id": {
+          "type": "string"
+        },
+        "origin_server": {
+          "type": "string",
+          "description": "Server that holds the referenced data."
+        },
+        "target_format": {
+          "type": "string",
+          "description": "Desired format for the imported data.",
+          "examples": ["spreadsheet", "table", "raw"]
+        }
+      }
+    },
+    "ImportFromRefResponse": {
+      "title": "Import From Reference Response",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["imported", "pending", "failed"]
+        },
+        "imported_resource_id": {
+          "type": "string",
+          "description": "Identifier for the imported resource in the target system."
+        },
+        "rows_imported": {
+          "type": "integer",
+          "description": "Number of rows/records imported, if applicable."
+        },
+        "error": {
+          "$ref": "error.json",
+          "description": "Structured error if status is 'failed'."
+        }
+      }
+    }
+  }
+}

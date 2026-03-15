@@ -20,7 +20,9 @@ schemas/
 ├── permissions.schema.json           # Permission model (Proposal #4)
 ├── streaming.schema.json             # Streaming & progress (Proposal #8)
 ├── transactions.schema.json          # Idempotency & transactions (Proposal #5)
-└── provenance.schema.json            # Source attribution (Proposal #7)
+├── provenance.schema.json            # Source attribution (Proposal #7)
+├── data-references.schema.json       # Data references (Proposal #9)
+└── subscribe-notify.schema.json      # Subscribe/notify (Proposal #15)
 ```
 
 ## Schemas
@@ -35,6 +37,8 @@ All schemas are [JSON Schema Draft-07](https://json-schema.org/draft-07/json-sch
 | `streaming.schema.json` | #8 | Progress notifications, stream chunks, checkpoint resumption |
 | `transactions.schema.json` | #5 | Idempotency keys, transaction lifecycle, compensation rollback |
 | `provenance.schema.json` | #7 | Source attribution with location, confidence, and transformation |
+| `data-references.schema.json` | #9 | Opaque data references for direct server-to-server data transfer |
+| `subscribe-notify.schema.json` | #15 | Bidirectional push via subscribe/notify event mechanism |
 
 ### Coverage Matrix
 
@@ -48,13 +52,13 @@ All schemas are [JSON Schema Draft-07](https://json-schema.org/draft-07/json-sch
 | 6. Human-in-the-Loop | ✅ (in manifest) | ✅ | ✅ | ✅ |
 | 7. Provenance | ✅ | ✅ | ✅ | — |
 | 8. Streaming & Progress | ✅ | ✅ | ✅ | ✅ |
-| 9. Data References | — | — | — | — |
+| 9. Data References | ✅ | — | — | — |
 | 10. Multimodal Signatures | ✅ (in manifest) | — | — | — |
 | 11. Structured Errors | ✅ | ✅ | ✅ | — |
 | 12. Conformance Suite | — | — | — | — |
 | 13. Server Discovery | ✅ (in manifest) | — | — | ✅ |
 | 14. Session State | — | ✅ | ✅ | — |
-| 15. Bidirectional Push | — | — | — | — |
+| 15. Bidirectional Push | ✅ | — | — | — |
 
 Proposals marked "—" are specified in the main proposal document but don't have standalone schemas or implementations yet. Contributions welcome.
 

@@ -14,21 +14,19 @@ A minimal but complete MCP server demonstrating the proposed protocol extensions
 
 This is a reference implementation, not production code.
 It uses an in-memory store and runs over stdio for simplicity.
-
-Requirements:
-    pip install mcp
+No external dependencies required (stdlib only).
 
 Usage:
     python server.py
 """
 
 import asyncio
+import base64
 import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from enum import Enum
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -43,7 +41,6 @@ class Ticket:
     status: str = "open"
     assignee: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    source_file: str | None = None
 
 
 # In-memory store
@@ -52,6 +49,7 @@ TICKETS: dict[str, Ticket] = {
     "PROJ-2": Ticket(id="PROJ-2", title="Add dark mode", status="in_progress", assignee="bob"),
     "PROJ-3": Ticket(id="PROJ-3", title="Update dependencies", status="closed", assignee="alice"),
 }
+TICKET_COUNTER = len(TICKETS)  # Monotonic counter — never decreases, even after deletes
 
 
 # =============================================================================
@@ -415,7 +413,9 @@ def handle_create_ticket(
                 },
             }
 
-    ticket_id = f"PROJ-{len(TICKETS) + 1}"
+    global TICKET_COUNTER
+    TICKET_COUNTER += 1
+    ticket_id = f"PROJ-{TICKET_COUNTER}"
     ticket = Ticket(
         id=ticket_id,
         title=params["title"],
@@ -525,10 +525,13 @@ async def handle_export_tickets(params: dict, send_progress=None) -> dict:
 # Extension 14: Session State
 # =============================================================================
 
-import base64
-
 class SessionStateManager:
-    """Manages opaque session state tokens."""
+    """Manages opaque session state tokens.
+
+    SECURITY NOTE: This reference implementation uses plain Base64 encoding for
+    clarity. Production implementations MUST use signed tokens (e.g., HMAC-SHA256)
+    or encrypted tokens (e.g., AES-GCM) to prevent client-side tampering.
+    """
 
     @staticmethod
     def encode(state: dict) -> str:
