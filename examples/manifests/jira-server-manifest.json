@@ -3,7 +3,7 @@
   "server": {
     "name": "jira-mcp-server",
     "version": "2.3.1",
-    "mcp_spec_version": "2026-01-01",
+    "mcp_spec_version": "2025-11-25",
     "description": "MCP server for Atlassian Jira — issue tracking, sprint management, and project analytics.",
     "homepage": "https://github.com/example/jira-mcp-server"
   },

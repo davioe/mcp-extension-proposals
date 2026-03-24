@@ -1,0 +1,163 @@
+{
+  "manifest_version": "0.1.0",
+  "server": {
+    "name": "slack-mcp-server",
+    "version": "2.1.0",
+    "mcp_spec_version": "2025-11-25",
+    "description": "MCP server for Slack — messaging, channels, file sharing, and team collaboration.",
+    "homepage": "https://github.com/example/slack-mcp-server"
+  },
+  "auth": {
+    "methods": ["oauth2_code"],
+    "scopes": [
+      { "name": "channels:read", "description": "View channels and channel metadata", "grants": ["list_channels", "search_messages"] },
+      { "name": "channels:write", "description": "Create, archive, and manage channels", "grants": ["create_channel", "archive_channel"] },
+      { "name": "chat:read", "description": "Read messages in channels and threads", "grants": ["search_messages"] },
+      { "name": "chat:write", "description": "Send and delete messages", "grants": ["send_message", "delete_message"] },
+      { "name": "users:read", "description": "View user profiles and presence", "grants": ["list_users", "get_user"] },
+      { "name": "files:read", "description": "Access shared files and file metadata", "grants": ["list_files", "get_file"] },
+      { "name": "files:write", "description": "Upload and manage files", "grants": ["upload_file", "delete_file"] }
+    ],
+    "session_ttl_seconds": 3600
+  },
+  "tools": [
+    {
+      "name": "search_messages",
+      "description": "Search messages across Slack channels and direct messages.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query text" },
+          "channel": { "type": "string", "description": "Channel ID to scope the search" },
+          "from_user": { "type": "string", "description": "Filter by sender username" },
+          "date_range": {
+            "type": "object",
+            "properties": {
+              "from": { "type": "string", "format": "date" },
+              "to": { "type": "string", "format": "date" }
+            }
+          },
+          "max_results": { "type": "integer", "default": 20, "maximum": 100 }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["channels:read", "chat:read"]
+    },
+    {
+      "name": "send_message",
+      "description": "Send a message to a Slack channel or direct message.",
+      "input_schema": {
+        "type": "object",
+        "required": ["channel", "text"],
+        "properties": {
+          "channel": { "type": "string", "description": "Channel ID or user ID" },
+          "text": { "type": "string" },
+          "thread_ts": { "type": "string", "description": "Thread timestamp to reply to" },
+          "unfurl_links": { "type": "boolean", "default": true }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["chat:write"]
+    },
+    {
+      "name": "delete_message",
+      "description": "Delete a message from a Slack channel. This action is permanent.",
+      "input_schema": {
+        "type": "object",
+        "required": ["channel", "timestamp"],
+        "properties": {
+          "channel": { "type": "string", "description": "Channel ID" },
+          "timestamp": { "type": "string", "description": "Message timestamp identifier" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "This will permanently delete the message from the channel. This action cannot be undone. Proceed?",
+      "risk_level": "destructive",
+      "required_scopes": ["chat:write"]
+    },
+    {
+      "name": "upload_file",
+      "description": "Upload a file to a Slack channel or direct message.",
+      "input_schema": {
+        "type": "object",
+        "required": ["channel", "content"],
+        "properties": {
+          "channel": { "type": "string", "description": "Channel ID to upload to" },
+          "content": { "type": "string", "description": "File content or base64-encoded binary" },
+          "filename": { "type": "string" },
+          "filetype": { "type": "string", "description": "File type identifier (e.g., 'png', 'pdf', 'csv')" },
+          "title": { "type": "string" },
+          "initial_comment": { "type": "string" }
+        }
+      },
+      "cost": { "category": "metered", "estimated_units": 2, "unit_label": "API credits" },
+      "latency": "seconds",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["files:write"],
+      "supports_streaming": true
+    },
+    {
+      "name": "list_channels",
+      "description": "List Slack channels the authenticated user has access to.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "types": { "type": "string", "description": "Comma-separated channel types: public_channel, private_channel, mpim, im", "default": "public_channel" },
+          "exclude_archived": { "type": "boolean", "default": true },
+          "limit": { "type": "integer", "default": 100, "maximum": 1000 }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["channels:read"],
+      "supports_pagination": true
+    }
+  ],
+  "supported_extensions": [
+    "streaming",
+    "progress_notifications",
+    "idempotency",
+    "session_state",
+    "intent_hints",
+    "human_in_the_loop",
+    "subscribe_notify"
+  ],
+  "rate_limits": {
+    "requests_per_minute": 60,
+    "requests_per_day": 20000,
+    "remaining": 19854,
+    "resets_at": "2026-03-25T18:00:00Z"
+  },
+  "recommendations": [
+    {
+      "capability": "workflow_automation",
+      "server_name": "slack-workflows-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/slack-workflows",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "high"
+    },
+    {
+      "capability": "file_storage",
+      "server_name": "google-drive-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/google-drive",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "medium"
+    }
+  ]
+}

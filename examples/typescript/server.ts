@@ -708,7 +708,336 @@ async function demo() {
   console.log("Error:", JSON.stringify(permError, null, 2));
 
   console.log("\n" + "=".repeat(70));
-  console.log("Demo complete.");
+  console.log("Demo complete (core extensions).");
+
+  // Additional proposal demos
+  await demoDataReferences();
+  await demoMultimodalSignatures();
+  await demoConformanceCheck();
+  await demoServerDiscovery();
+  await demoSubscription();
+
+  console.log("\n" + "=".repeat(70));
+  console.log("All demos complete.");
+}
+
+// =============================================================================
+// Extension 9: Data References
+// =============================================================================
+
+async function demoDataReferences() {
+  const log = (title: string) => console.log(`\n--- ${title} ---`);
+  log("11. Data References (Proposal #9)");
+
+  // Server A exports data and returns a reference
+  async function serverAExport(_dataset: string) {
+    const refId = `ref-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const dataPayload = JSON.stringify({ tickets: [...tickets.values()].slice(0, 2) });
+    const checksum = `sha256:${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}`;
+    return {
+      ref_id: refId,
+      origin_server: "project-tracker-mcp",
+      mime_type: "application/json",
+      size_bytes: Buffer.byteLength(dataPayload),
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      access_url: `https://project-tracker.example.com/refs/${refId}`,
+      checksum,
+    };
+  }
+
+  // Client obtains the reference from Server A
+  const reference = await serverAExport("open_tickets");
+  console.log(`Server A returned reference: ${reference.ref_id}`);
+  console.log(`  origin_server: ${reference.origin_server}`);
+  console.log(`  mime_type: ${reference.mime_type}, size_bytes: ${reference.size_bytes}`);
+  console.log(`  access_url: ${reference.access_url}`);
+
+  // Server B imports data using the reference
+  async function serverBImport(ref: typeof reference) {
+    return {
+      status: "imported",
+      ref_id: ref.ref_id,
+      origin_server: ref.origin_server,
+      records_imported: 2,
+      checksum_verified: true,
+    };
+  }
+
+  const importResult = await serverBImport(reference);
+  console.log(`Server B import result: status=${importResult.status}, records=${importResult.records_imported}, checksum_verified=${importResult.checksum_verified}`);
+}
+
+// =============================================================================
+// Extension 10: Multimodal Tool Signatures
+// =============================================================================
+
+async function demoMultimodalSignatures() {
+  const log = (title: string) => console.log(`\n--- ${title} ---`);
+  log("12. Multimodal Tool Signatures (Proposal #10)");
+
+  // Define a tool with explicit input/output type annotations
+  const toolDefinition = {
+    name: "analyze_image",
+    description: "Analyze an image and return structured JSON results.",
+    input_types: ["image/png", "image/jpeg"],
+    output_types: ["application/json"],
+    max_input_size_bytes: 10 * 1024 * 1024, // 10 MB
+    input_schema: {
+      type: "object",
+      required: ["image_data", "analysis_type"],
+      properties: {
+        image_data: { type: "string", description: "Base64-encoded image" },
+        analysis_type: { type: "string", enum: ["labels", "objects", "text"] },
+      },
+    },
+  };
+
+  console.log(`Tool: ${toolDefinition.name}`);
+  console.log(`  Accepts: ${toolDefinition.input_types.join(", ")}`);
+  console.log(`  Returns: ${toolDefinition.output_types.join(", ")}`);
+  console.log(`  Max input size: ${toolDefinition.max_input_size_bytes} bytes`);
+
+  // Simulate a client calling this tool with a binary payload
+  const fakeImageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(64).fill(0)]);
+  const requestPayload = {
+    tool: "analyze_image",
+    parameters: {
+      image_data: fakeImageBytes.toString("base64"),
+      analysis_type: "labels",
+    },
+    content_type: "image/png",
+  };
+
+  console.log(`  Client sends ${fakeImageBytes.length} bytes as ${requestPayload.content_type}`);
+
+  // Simulate the tool returning a structured JSON result
+  const analysisResult = {
+    labels: [
+      { name: "architecture_diagram", confidence: 0.92 },
+      { name: "flowchart", confidence: 0.87 },
+      { name: "technical_drawing", confidence: 0.65 },
+    ],
+    image_dimensions: { width: 1024, height: 768 },
+    analysis_type: "labels",
+  };
+
+  console.log(`  Result: ${JSON.stringify(analysisResult, null, 4)}`);
+}
+
+// =============================================================================
+// Extension 12: Conformance Check
+// =============================================================================
+
+async function demoConformanceCheck() {
+  const log = (title: string) => console.log(`\n--- ${title} ---`);
+  log("13. Conformance Check (Proposal #12)");
+
+  // Define a mini test suite
+  const testSuite = [
+    {
+      test_id: "CONF-001",
+      description: "Server returns a valid manifest on get_manifest",
+      request: { tool: "get_manifest" } as MCPRequest,
+      expected: (r: Record<string, unknown>) => "server" in r && "tools" in r,
+    },
+    {
+      test_id: "CONF-002",
+      description: "Permission check returns allowed=True for granted scope",
+      request: { tool: "check_permissions", parameters: { tool: "search_tickets" } } as MCPRequest,
+      expected: (r: Record<string, unknown>) => r.allowed === true,
+    },
+    {
+      test_id: "CONF-003",
+      description: "Permission check returns allowed=False for missing scope",
+      request: { tool: "check_permissions", parameters: { tool: "delete_ticket" } } as MCPRequest,
+      expected: (r: Record<string, unknown>) => r.allowed === false,
+    },
+    {
+      test_id: "CONF-004",
+      description: "Structured error returned for unknown tool",
+      request: { tool: "nonexistent_tool", parameters: {} } as MCPRequest,
+      expected: (r: Record<string, unknown>) => "error" in r,
+    },
+  ];
+
+  // Run tests against the mock server
+  let passed = 0;
+  let failed = 0;
+  const results: { test_id: string; status: string; description: string }[] = [];
+
+  for (const test of testSuite) {
+    const response = await handleRequest(test.request);
+    const success = test.expected(response);
+    const status = success ? "PASSED" : "FAILED";
+    if (success) passed++;
+    else failed++;
+    results.push({ test_id: test.test_id, status, description: test.description });
+    console.log(`  [${status}] ${test.test_id}: ${test.description}`);
+  }
+
+  // Produce conformance report
+  const report = {
+    conformance_report: {
+      server: "project-tracker-mcp",
+      total_tests: testSuite.length,
+      passed,
+      failed,
+      pass_rate: `${((passed / testSuite.length) * 100).toFixed(0)}%`,
+      results,
+    },
+  };
+  console.log(`  Report: ${passed}/${testSuite.length} passed (${report.conformance_report.pass_rate})`);
+}
+
+// =============================================================================
+// Extension 13: Server Discovery
+// =============================================================================
+
+async function demoServerDiscovery() {
+  const log = (title: string) => console.log(`\n--- ${title} ---`);
+  log("14. Server Discovery (Proposal #13)");
+
+  // Simulated registry of known servers
+  const registry = [
+    {
+      server_name: "figma-mcp",
+      description: "Design tool integration for creating and editing mockups.",
+      capabilities: ["design_mockup", "export_assets", "design_system"],
+      registry_url: "https://registry.mcp.example.com/servers/figma-mcp",
+      auth_flow: "oauth2_authorization_code",
+      version: "2.3.0",
+    },
+    {
+      server_name: "canva-mcp",
+      description: "Quick design mockups and social media graphics.",
+      capabilities: ["design_mockup", "social_media_graphics"],
+      registry_url: "https://registry.mcp.example.com/servers/canva-mcp",
+      auth_flow: "api_key",
+      version: "1.1.0",
+    },
+    {
+      server_name: "miro-mcp",
+      description: "Collaborative whiteboarding and diagramming.",
+      capabilities: ["whiteboard", "diagramming", "design_mockup"],
+      registry_url: "https://registry.mcp.example.com/servers/miro-mcp",
+      auth_flow: "oauth2_device",
+      version: "3.0.1",
+    },
+  ];
+
+  // Query for a capability
+  const capabilityNeeded = "design_mockup";
+  console.log(`Searching for servers with capability: '${capabilityNeeded}'`);
+
+  const recommendations: { server_name: string; registry_url: string; auth_flow: string; match_confidence: number }[] = [];
+  for (const server of registry) {
+    if (server.capabilities.includes(capabilityNeeded)) {
+      const matchConfidence = Math.round((1.0 / server.capabilities.length) * 100) / 100;
+      recommendations.push({
+        server_name: server.server_name,
+        registry_url: server.registry_url,
+        auth_flow: server.auth_flow,
+        match_confidence: matchConfidence,
+      });
+    }
+  }
+
+  // Sort by confidence descending
+  recommendations.sort((a, b) => b.match_confidence - a.match_confidence);
+
+  for (const rec of recommendations) {
+    console.log(`  Recommended: ${rec.server_name} (confidence=${rec.match_confidence}, auth=${rec.auth_flow})`);
+    console.log(`    registry_url: ${rec.registry_url}`);
+  }
+
+  // Show how a client would connect to the top recommendation
+  if (recommendations.length > 0) {
+    const top = recommendations[0];
+    console.log(`\n  Client would connect to '${top.server_name}' via:`);
+    console.log(`    1. Fetch manifest from ${top.registry_url}/manifest`);
+    console.log(`    2. Authenticate using ${top.auth_flow}`);
+    console.log(`    3. Call tools with capability '${capabilityNeeded}'`);
+  }
+}
+
+// =============================================================================
+// Extension 15: Subscriptions
+// =============================================================================
+
+async function demoSubscription() {
+  const log = (title: string) => console.log(`\n--- ${title} ---`);
+  log("15. Event Subscriptions (Proposal #15)");
+
+  // In-memory subscription manager
+  const subscriptions = new Map<string, { subscription_id: string; events: string[]; filter: Record<string, string>; created_at: string; status: string }>();
+
+  async function subscribe(events: string[], filterParams: Record<string, string> = {}) {
+    const subId = `sub-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const sub = {
+      subscription_id: subId,
+      events,
+      filter: filterParams,
+      created_at: new Date().toISOString(),
+      status: "active",
+    };
+    subscriptions.set(subId, sub);
+    return sub;
+  }
+
+  async function emitEvent(subId: string, eventType: string, payload: Record<string, unknown>) {
+    return {
+      subscription_id: subId,
+      event_type: eventType,
+      timestamp: new Date().toISOString(),
+      payload,
+    };
+  }
+
+  async function unsubscribe(subId: string) {
+    const sub = subscriptions.get(subId);
+    if (sub) {
+      sub.status = "cancelled";
+      return { subscription_id: subId, status: "cancelled" };
+    }
+    return { error: "subscription_not_found", subscription_id: subId };
+  }
+
+  // Subscribe to events
+  const sub = await subscribe(
+    ["commit_to_main", "pr_review_requested"],
+    { repo: "example/project-tracker-mcp", branch: "main" },
+  );
+  console.log(`Subscribed: ${sub.subscription_id}`);
+  console.log(`  Events: ${sub.events.join(", ")}`);
+  console.log(`  Filter: ${JSON.stringify(sub.filter)}`);
+
+  // Simulate receiving event notifications
+  const eventsReceived = [
+    await emitEvent(sub.subscription_id, "commit_to_main", {
+      commit_sha: "a1b2c3d",
+      author: "alice",
+      message: "Fix login redirect loop",
+    }),
+    await emitEvent(sub.subscription_id, "pr_review_requested", {
+      pr_number: 142,
+      title: "Add dark mode support",
+      reviewer: "bob",
+    }),
+    await emitEvent(sub.subscription_id, "commit_to_main", {
+      commit_sha: "e4f5g6h",
+      author: "charlie",
+      message: "Update CI pipeline config",
+    }),
+  ];
+
+  for (const evt of eventsReceived) {
+    console.log(`  Event: ${evt.event_type} at ${evt.timestamp}`);
+    console.log(`    Payload: ${JSON.stringify(evt.payload)}`);
+  }
+
+  // Unsubscribe
+  const unsub = await unsubscribe(sub.subscription_id);
+  console.log(`Unsubscribed: ${unsub.subscription_id}, status=${unsub.status}`);
 }
 
 demo().catch(console.error);

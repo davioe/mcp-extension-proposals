@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mcp-extension-proposals.github.io/schemas/subscribe-notify.json",
   "title": "MCP Subscribe/Notify",
   "description": "Schemas for bidirectional context push — servers proactively notify clients of relevant events without polling.",

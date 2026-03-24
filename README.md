@@ -1,6 +1,56 @@
 # Proposal: MCP Protocol Extensions for Robust Agent Workflows
 
-> **RFC-style proposal for extending the Model Context Protocol**
+[![Validate Schemas & Manifests](https://github.com/davioe/mcp-extension-proposals/actions/workflows/validate.yml/badge.svg)](https://github.com/davioe/mcp-extension-proposals/actions/workflows/validate.yml)
+
+> **RFC-style gap analysis and extension proposals for the Model Context Protocol**
+
+## Quick Start
+
+This repository contains **15 concrete extension proposals** for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), organized into 5 pillars. Each proposal includes a problem statement, solution design, JSON examples, limitations, and alternatives considered.
+
+**What's inside:**
+- **README** — Full proposal text with gap analysis against the current MCP spec
+- **[`schemas/`](schemas/)** — JSON Schema 2020-12 definitions for all 15 proposals
+- **[`examples/`](examples/)** — Reference implementations in Python and TypeScript, plus 5 example manifests
+- **[`seps/`](seps/)** — SEP-formatted versions of the top 3 proposals, ready for submission to the official MCP repo
+
+## Current Status
+
+| Item | Status |
+|------|--------|
+| Spec baseline | [MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) |
+| Schema dialect | JSON Schema 2020-12 (per SEP-1613) |
+| Schema coverage | 15/15 proposals (10 dedicated files + 5 in service manifest) |
+| Reference implementations | 15/15 proposals (Python + TypeScript) |
+| Example manifests | 5 (GitHub, Jira, Slack, Linear, Notion) |
+| SEP submissions | 3 prepared (#11, #5, #6) — not yet submitted |
+
+## Table of Contents
+
+- [What MCP Gets Right](#what-mcp-gets-right)
+- [Relationship to Current MCP Spec](#relationship-to-current-mcp-spec-2025-11-25)
+- **Pillar I — Transparency and Planning**
+  - [1. Capability Discovery & Service Manifest](#1-capability-discovery-and-service-manifest)
+  - [2. Intent Hints](#2-intent-hints)
+  - [3. Cost & Latency Transparency](#3-cost-and-latency-transparency)
+- **Pillar II — Safety and Reliability**
+  - [4. Granular Permissions & Scoped Auth](#4-granular-permissions-and-scoped-auth)
+  - [5. Idempotency & Transactions](#5-idempotency-and-transactions)
+  - [6. Human-in-the-Loop](#6-human-in-the-loop-as-a-protocol-primitive)
+  - [7. Provenance](#7-provenance--structured-source-attribution)
+- **Pillar III — Performance and Scalability**
+  - [8. Streaming & Progress](#8-streaming-and-progress-notifications)
+  - [9. Data References](#9-data-references-instead-of-data-transfer)
+  - [10. Multimodal Signatures](#10-multimodal-tool-signatures)
+- **Pillar IV — Developer Experience**
+  - [11. Structured Errors](#11-structured-error-model)
+  - [12. Conformance Suite](#12-conformance-test-suite)
+  - [13. Server Discovery](#13-server-discovery-and-recommendations)
+- **Pillar V — Statefulness**
+  - [14. Session State](#14-session-state-across-tool-calls)
+  - [15. Bidirectional Push](#15-bidirectional-context-push)
+- [Priority Summary](#priority-summary)
+- [Design Principles](#design-principles)
 
 ## What MCP Gets Right
 
@@ -13,11 +63,35 @@ MCP is one of the most impactful ideas to emerge from the AI ecosystem in recent
 
 For single-step tool calls — "search Jira for issue X", "fetch the weather in Berlin" — MCP already works remarkably well. This proposal is about what happens when you move beyond single steps.
 
-> **Baseline:** This proposal is written against the [MCP specification as of 2025-03-26](https://spec.modelcontextprotocol.io/). Some features described here may overlap with newer spec revisions — contributions that track the latest spec are welcome.
+> **Baseline:** This proposal is written against the [MCP specification revision 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25), which is the current released version as of March 2026. Tool annotations (`destructiveHint`, `idempotentHint`, `readOnlyHint`), `outputSchema`, elicitation, and Tasks (SEP-1686) are acknowledged where they overlap with these proposals.
 
 ## Where MCP Hits Its Limits
 
 In practice, real-world agent workflows are multi-step, data-intensive, and failure-prone. MCP's current design creates systematic friction in five areas. This proposal addresses each with concrete, backwards-compatible extensions.
+
+## Relationship to Current MCP Spec (2025-11-25)
+
+The following table maps each proposal against the current specification and existing SEPs. This ensures we address **genuine remaining gaps**, not problems already solved.
+
+| # | Proposal | Spec Coverage | Relevant SEP | Gap Status | What Remains |
+|---|----------|--------------|--------------|------------|-------------|
+| 1 | Capability Discovery & Manifest | `initialize` negotiation + tool `annotations` | SEP-2133 (Extensions) | **Partially addressed** | No operational metadata (rate limits, quotas, cost, latency per tool). No runtime re-introspection beyond `listChanged`. |
+| 2 | Intent Hints | None | — | **Not addressed** | No mechanism for clients to communicate *why* they are calling a tool. |
+| 3 | Cost & Latency Transparency | None | — | **Not addressed** | No cost, latency, or quota metadata on tool definitions. |
+| 4 | Granular Permissions & Scoped Auth | OAuth 2.1 at transport level | — | **Partially addressed** | No per-tool scopes, no `can_execute` pre-flight check, no session TTL semantics. Permission boundaries discovered only through failures. |
+| 5 | Idempotency & Transactions | `idempotentHint` annotation (advisory only) | — | **Not addressed** | Hint tells clients a tool *is* idempotent — but provides no wire-level idempotency key mechanism or transaction/rollback protocol. |
+| 6 | Human-in-the-Loop | `destructiveHint` annotation (advisory) + Elicitation | — | **Partially addressed** | Annotations are advisory — no mandatory confirmation protocol. Elicitation enables user input but is server-initiated for data gathering, not a tool-level "confirm before execute" gate. |
+| 7 | Provenance | None | — | **Not addressed** | No source attribution mechanism on tool responses. |
+| 8 | Streaming & Progress | `notifications/progress` + SSE transport | SEP-1686 (Tasks, experimental) | **Partially addressed** | Progress is numeric-only. No partial result streaming. No checkpoint/resume tokens. Tasks are experimental with incomplete SDK support. |
+| 9 | Data References | None | — | **Not addressed** | All data flows through the client. No server-to-server reference/transfer mechanism. |
+| 10 | Multimodal Signatures | Base64 content types (image, audio) | — | **Partially addressed** | No tool-level MIME type declarations, no `max_input_size_bytes`, no efficient binary transport (multipart). All binary is base64-in-JSON. |
+| 11 | Structured Error Model | JSON-RPC error codes only | — | **Not addressed** | No `category`, `retry_after_seconds`, `user_actionable`, or `suggestion` fields. No structured retry semantics. |
+| 12 | Conformance Test Suite | None | Part of governance roadmap | **Not addressed** | No standardized test kit for validating servers against the spec. |
+| 13 | Server Discovery | None | — | **Not addressed** | No registry, recommendation, or capability-based server search. |
+| 14 | Session State | Transport-level `Mcp-Session-Id` | — | **Partially addressed** | Session ID exists but no cross-call opaque state tokens (cookie-style). No TTL, no session resumption after disconnection. |
+| 15 | Bidirectional Push | Resource-URI subscriptions only | — | **Partially addressed** | Subscriptions limited to resource URIs. No general-purpose event subscription (e.g., "commit to main", "ticket resolved"). No event filtering or taxonomy. |
+
+**Summary:** 0 proposals fully addressed, 7 partially addressed, 8 not addressed. All 15 proposals identify genuine remaining gaps even accounting for the 2025-11-25 spec and existing finalized SEPs (see [SEP index](https://modelcontextprotocol.io/community/seps) for the current count).
 
 ---
 
@@ -38,6 +112,8 @@ In practice, real-world agent workflows are multi-step, data-intensive, and fail
 **Extension — Runtime Introspection:** Because server capabilities can change at runtime (new custom fields in Jira, new workspaces in Asana), servers SHOULD also expose a `/capabilities` endpoint that returns the current schema on demand — not only during the initial handshake.
 
 This is similar in spirit to the Language Server Protocol's capability negotiation and would eliminate an entire class of trial-and-error tool calls.
+
+> **Open question:** How frequently should manifests be refreshed? Runtime introspection addresses dynamic capabilities, but aggressive polling wastes resources while infrequent checks may serve stale metadata. A `manifest_ttl` or `listChanged`-style notification for manifest updates would help, but adds complexity.
 
 ---
 
@@ -68,6 +144,8 @@ The server MAY respond with a routing suggestion:
 
 This turns the server from a passive executor into a collaborative participant that can guide clients toward optimal tool usage.
 
+> **Limitation:** Intent hints are inherently gameable. A malicious server could use the intent field to steer clients toward tools that maximize API consumption or data exfiltration. Clients SHOULD treat routing suggestions as advisory and apply their own trust model before following redirections.
+
 ---
 
 ### 3. Cost and Latency Transparency
@@ -91,6 +169,8 @@ This turns the server from a passive executor into a collaborative participant t
 
 This enables informed decision-making: "This export will take ~2 minutes and use 5 of your 12 remaining daily API calls. Should I proceed, or would you prefer a smaller date range?"
 
+> **Limitation:** Cost and latency estimates are inherently approximate. Actual latency depends on server load, downstream API response times, and data volume — none of which are fully predictable at declaration time. Servers SHOULD treat these as categories (instant/seconds/minutes) rather than precise predictions, and clients SHOULD present them as estimates, not guarantees.
+
 ---
 
 ## Pillar II — Safety and Reliability
@@ -107,6 +187,8 @@ This enables informed decision-making: "This export will take ~2 minutes and use
 - **Transparent scope reporting** so the client can inform the user: "I can read your Jira tickets but not edit them — would you like to grant write access?"
 
 This is the prerequisite for users trusting agents with complex multi-step workflows. Without it, every chained operation is a gamble.
+
+> **Limitation:** Scope granularity varies wildly across real APIs — GitHub has `repo`, `read:org`, `admin:repo_hook`; Jira has `read:jira-work`, `write:jira-work`; Slack has `channels:read`, `chat:write`. No universal scope taxonomy exists. This proposal defines the *mechanism* for scope negotiation, not a standard scope vocabulary. Server implementers must map their own API's permission model into the MCP scope format.
 
 ---
 
@@ -136,6 +218,17 @@ ROLLBACK tx-001
 
 The transaction mechanism is opt-in. Servers that don't support it simply reject `BEGIN_TRANSACTION` with a clear error. But for servers that do, this eliminates an entire category of silent data corruption.
 
+> **Note:** The spec's `idempotentHint` annotation tells clients a tool *is* idempotent — but provides no mechanism to *enforce* it. An idempotency key is what makes "call this twice" actually safe at the wire level.
+
+**Limitations and failure modes:**
+
+- **Compensation failures.** The Saga pattern (compensation-based rollback) is best-effort, not ACID. If step 3 fails and the compensation for step 2 also fails (e.g., the Confluence API is down), the transaction enters a partially-rolled-back state. The protocol must surface this clearly — `steps_compensated` in the rollback response includes per-step status and error details — but it cannot guarantee full consistency across independent external systems.
+- **No isolation.** Between `BEGIN_TRANSACTION` and `COMMIT`/`ROLLBACK`, other clients may observe intermediate state (e.g., a Jira ticket created in step 1 is visible before step 3 completes). This is inherent to compensation-based transactions over external APIs that don't support distributed locks.
+- **CAP theorem applies.** Cross-system transactions (Jira + Confluence + Slack) operate across independent availability zones. Network partitions between the MCP server and any downstream API can leave transactions in an indeterminate state. The `timeout_seconds` field bounds the window, but the fundamental tension between consistency and availability remains.
+- **Not a replacement for database transactions.** This model is appropriate for orchestrating API calls across loosely-coupled systems. For operations requiring true atomicity (financial transfers, inventory management), the backing system must provide its own transactional guarantees — the MCP transaction wrapper coordinates, but cannot upgrade the guarantees of the underlying APIs.
+
+**Why this approach?** Two-phase commit (2PC) was rejected because it requires all participating systems to support a prepare/commit protocol — external SaaS APIs (Jira, Slack, Confluence) do not. Event sourcing was considered but adds complexity disproportionate to the use case — most multi-step agent workflows need "undo on failure," not a complete event log. Compensation-based Sagas are the standard pattern for distributed transactions across systems that only support forward operations and explicit rollback.
+
 ---
 
 ### 6. Human-in-the-Loop as a Protocol Primitive
@@ -154,6 +247,10 @@ The transaction mechanism is opt-in. Servers that don't support it simply reject
 ```
 
 When this flag is set, the client MUST obtain explicit user approval before executing the call. The `risk_level` field (`safe`, `reversible`, `destructive`) gives additional context for UI treatment.
+
+> **Note:** The spec's `destructiveHint` annotation serves a similar purpose but is advisory — clients MAY ignore it. This proposal makes confirmation mandatory when `requires_confirmation` is set, creating a stronger safety guarantee. The two mechanisms can coexist: `destructiveHint` for backward-compatible hinting, `requires_confirmation` for enforced gates.
+
+> **Limitation:** Mandatory confirmation adds latency to every destructive operation. In high-throughput agent workflows (e.g., bulk ticket updates), requiring user confirmation for each action may be impractical. A batch confirmation mode ("approve all 50 deletions at once") or a trust-level escalation mechanism would mitigate this, but adds protocol complexity.
 
 ---
 
@@ -177,6 +274,8 @@ When this flag is set, the client MUST obtain explicit user approval before exec
 
 This turns opaque data into traceable facts. The client can tell the user: "Q3 revenue was $4.2M — sourced from page 3 of invoice_v2.pdf, retrieved March 10th." That is a fundamentally different trust level than an unsourced number.
 
+> **Limitation:** Provenance is only as trustworthy as the server providing it. A malicious or buggy server can return fabricated provenance metadata. Clients SHOULD treat provenance as a convenience for citation, not as cryptographic proof. True verifiability would require content hashing or signatures, which is outside the scope of this proposal.
+
 ---
 
 ## Pillar III — Performance and Scalability
@@ -199,6 +298,10 @@ This turns opaque data into traceable facts. The client can tell the user: "Q3 r
 
 For result-rich operations, additionally: **streaming partial results** so the client can begin presenting data before the operation completes, and **checkpoint tokens** that allow resuming an interrupted operation from where it left off rather than restarting.
 
+> **Note:** SEP-1686 (Tasks) covers deferred execution and state tracking for long-running operations — but is still marked experimental with incomplete SDK support. This proposal's checkpoint/resume mechanism complements Tasks by adding data-level resumability, not just operation-level state tracking.
+
+> **Limitation:** Checkpoint tokens assume the server can reconstruct its processing state from a token — this requires server-side state management (cursor positions, intermediate results). Stateless servers or servers backed by external APIs that don't support pagination cursors cannot implement checkpoints. The protocol should define checkpoint support as optional per-operation.
+
 ---
 
 ### 9. Data References Instead of Data Transfer
@@ -214,7 +317,22 @@ Client → Server B (Google Sheets): import_from_ref("analysis-789")
 
 The data flows directly between servers (or via a mediated channel). The client orchestrates without carrying the payload. This is analogous to Unix pipes — the shell connects processes without buffering all data in memory.
 
-Implementation could use signed URLs with TTL, a shared object store, or a broker service. The protocol only needs to define the reference format and exchange mechanism.
+**Implementation considerations:**
+
+The reference format itself is straightforward — an opaque ID with metadata (origin server, MIME type, size, expiry). The transport layer is the hard part:
+
+- **Signed URLs with TTL** are the simplest approach. Server A generates a pre-signed URL (e.g., S3, GCS) with a time-limited token. Server B downloads directly. This works when both servers can reach the same storage backend, but requires shared cloud infrastructure and careful secret management.
+- **Shared object store** (S3-compatible) assumes both servers have credentials to the same bucket. This is common within an organization but breaks across organizational boundaries.
+- **Broker service** mediates the transfer without shared credentials. Server A uploads to the broker; Server B downloads from the broker using the reference ID. This is the most flexible but adds latency and a single point of failure.
+- **Authentication delegation** is the unsolved problem. When Server B fetches from Server A's signed URL, it needs no credentials — the URL *is* the credential. But when using a broker, both servers need broker credentials, and the broker needs to verify that Server B is authorized to access a reference created by Server A. The authorization chain (User → Client → Server A → Broker → Server B) must be explicitly defined.
+
+**Limitations:**
+
+- **Size and timeout constraints.** Large datasets (>1GB) require chunked transfer and resumption. The `expires_at` field on references must account for transfer time, not just decision time. A reference that expires before the download completes is useless.
+- **No standard exists for the transport layer.** This proposal defines the reference format and exchange protocol, but the actual data transport (signed URL vs. broker vs. shared store) is an implementation decision. Interoperability between different transport implementations is not guaranteed.
+- **Cross-organization use requires trust negotiation** that is outside the scope of this proposal.
+
+**Why this approach?** Streaming the full dataset through the client was rejected because it forces the client to buffer potentially gigabytes of data in its context window — a fundamental architectural mismatch. Shared-memory or IPC approaches were rejected because MCP servers are typically separate processes or remote services, not co-located modules. Opaque references are the minimal primitive that enables direct server-to-server transfer while keeping the client in control of orchestration.
 
 ---
 
@@ -235,6 +353,8 @@ Implementation could use signed URLs with TTL, a shared object store, or a broke
 ```
 
 The key constraint: this must remain **model-agnostic**. No vendor-specific image generation flags or proprietary format parameters in the core protocol. Vendor extensions belong in a separate namespace.
+
+> **Limitation:** Defining a fixed set of supported MIME types in tool signatures creates a versioning problem — new media types (e.g., 3D models, point clouds) would require schema updates. The `input_types`/`output_types` arrays should be treated as declarative hints for capability matching, not as an exhaustive allowlist. Servers SHOULD accept content with unlisted MIME types when the underlying tool can handle them.
 
 ---
 
@@ -261,6 +381,8 @@ The key constraint: this must remain **model-agnostic**. No vendor-specific imag
 
 The `category` field (`transient`, `permanent`, `auth_required`, `invalid_input`) enables intelligent retry logic. `user_actionable` tells the client whether to surface the error to the user or handle it silently. `suggestion` provides a concrete next step.
 
+> **Limitation:** Error categories are necessarily coarse — real-world errors often span categories (e.g., a rate limit that is transient but also requires auth re-elevation). The `category` field should be treated as the primary classification for retry logic, with the `details` object carrying additional context. Servers SHOULD NOT use `suggestion` for security-sensitive guidance (e.g., "try a different API key") as this could be exploited in social engineering attacks.
+
 ---
 
 ### 12. Conformance Test Suite
@@ -277,6 +399,8 @@ The `category` field (`transient`, `permanent`, `auth_required`, `invalid_input`
 - Graceful degradation for optional features
 
 Servers that pass the suite can display a conformance badge. This creates a quality floor that benefits the entire ecosystem — better servers mean fewer defensive workarounds in every client.
+
+> **Limitation:** Conformance testing can only validate observable protocol behavior, not internal implementation quality. A server may pass all conformance tests while still being unreliable under load, insecure in its data handling, or buggy in edge cases. The test suite should be positioned as a necessary condition for quality, not a sufficient one. Additionally, maintaining a conformance suite against a moving spec requires ongoing investment — tests must be versioned alongside the specification.
 
 ---
 
@@ -302,6 +426,8 @@ Servers that pass the suite can display a conformance badge. This creates a qual
 
 Combined with a **central MCP server registry** where servers are searchable by capability, this creates a self-healing ecosystem. Instead of manual server hunting, the protocol itself routes clients toward the right tool.
 
+> **Limitation:** A centralized registry creates a trust and governance problem: who decides which servers are listed? How are malicious or low-quality servers excluded? A decentralized approach (servers recommend peers they trust) avoids centralization but creates echo chambers. The registry model also raises privacy concerns — querying a registry reveals what capabilities a user needs, which may be sensitive in enterprise contexts.
+
 ---
 
 ## Pillar V — Statefulness
@@ -322,6 +448,10 @@ Combined with a **central MCP server registry** where servers are searchable by 
 
 The server decides what the state contains. The client treats it as an opaque token. This is the same pattern as HTTP cookies — simple, proven, and backwards-compatible (servers that don't use state simply never return the field).
 
+**Why this approach?** Server-side session stores (Redis, database-backed) were rejected because they require server infrastructure beyond the MCP protocol itself and create state management burden for server implementers. Client-side structured state (where the client understands and manages the state) was rejected because it violates encapsulation — the server's internal state should not be a client concern. Opaque tokens give servers full control over state encoding while keeping the protocol simple and the client implementation trivial.
+
+> **Limitation:** Opaque tokens shift storage burden to the client, which must persist and replay tokens it doesn't understand. Token size is unbounded — a server could encode megabytes of state, degrading client performance. The protocol SHOULD recommend a maximum token size (e.g., 64KB) and define behavior when tokens exceed it. Additionally, token invalidation is implicit (the server simply rejects stale tokens), which provides no graceful recovery path for the client.
+
 ---
 
 ### 15. Bidirectional Context Push
@@ -341,6 +471,18 @@ The server decides what the state contains. The client treats it as an opaque to
 ```
 
 The server sends notifications when matching events occur — no polling required. This is particularly valuable for real-time collaboration scenarios: a Git server that notifies when the branch was updated, a project management tool that alerts when a blocking ticket is resolved.
+
+> **Note:** The current spec supports resource-URI subscriptions (`resources/subscribe`) and `listChanged` notifications, but these are limited to resource state changes. This proposal extends subscriptions to arbitrary domain events with filtering — a fundamentally different scope.
+
+**Transport impact and limitations:**
+
+- **stdio transport has weaker push guarantees.** The stdio transport uses stdin/stdout pipes. While servers can write to stdout at any time (and most clients maintain a read loop for JSON-RPC notifications), stdio lacks the connection management, backpressure, and reconnection semantics of WebSocket or SSE. High-frequency event streams over stdio may suffer from buffering issues, and there is no standard mechanism to signal subscription health or detect dropped events.
+- **Streamable HTTP transport is the natural fit.** Server-Sent Events (SSE) over HTTP already support server→client push. This proposal's subscription mechanism maps cleanly onto SSE — each subscription becomes an SSE channel. The client opens a persistent connection, and the server pushes events as they occur.
+- **Fallback for non-persistent transports.** For transports that don't support persistent connections, the subscription mechanism SHOULD degrade to a polling hint: the server returns `supported: false` for push subscriptions and instead includes a `poll_interval_seconds` recommendation. The client polls at the suggested interval using a standard tool call.
+- **Subscription lifecycle management.** Long-lived subscriptions consume server resources (memory, connection slots, webhook registrations). The `ttl_seconds` field bounds the subscription lifetime, and the server MAY terminate subscriptions early under resource pressure. Clients must handle `subscription_terminated` notifications gracefully.
+- **Event ordering is not guaranteed across subscriptions.** Events within a single subscription are delivered in order. Events across different subscriptions to the same server may arrive out of order due to internal server concurrency.
+
+**Why this approach?** Polling was rejected because it wastes resources when events are infrequent and introduces latency proportional to the poll interval. Long-polling was considered as a middle ground but adds complexity for marginal benefit when SSE/WebSocket transports are already available. A subscription model with explicit event filtering is the standard pattern in event-driven systems (Webhooks, GraphQL Subscriptions, gRPC streaming) and maps naturally onto MCP's existing notification infrastructure.
 
 ---
 
@@ -382,22 +524,29 @@ All 15 proposals follow these constraints:
 
 This repository goes beyond the proposal text and includes concrete artifacts:
 
-- **JSON Schemas** (Draft-07) for 8 of the 15 proposals — see [`schemas/`](schemas/)
-- **Reference implementations** in Python and TypeScript demonstrating 10 of the 15 proposals — see [`examples/`](examples/)
-- **Realistic example manifests** for Jira and GitHub MCP servers — see [`examples/manifests/`](examples/manifests/)
+- **JSON Schemas** (JSON Schema 2020-12) for all 15 proposals — see [`schemas/`](schemas/)
+- **Reference implementations** in Python and TypeScript for all 15 proposals — see [`examples/`](examples/)
+- **5 realistic example manifests** for GitHub, Jira, Slack, Linear, and Notion — see [`examples/manifests/`](examples/manifests/)
+- **3 SEP-formatted proposals** ready for submission to the official MCP repo — see [`seps/`](seps/)
+
 
 For full coverage details, see the [coverage matrix](examples/README.md#coverage-matrix).
 
 ## Next Steps
 
-Areas where contributions would be most valuable:
+### SEP Submissions (Planned)
 
-- **Conformance test suite** (Proposal #12) — even a minimal test runner that validates manifests against the schema
-- **Alignment with latest MCP spec** — tracking which proposals overlap with newer spec revisions
-- **Additional example manifests** for other real-world servers (Slack, Linear, Notion, etc.)
+Three proposals are being prepared for submission to the official MCP SEP process:
+
+1. **#11 Structured Errors** (Standards Track) — see [`seps/0000-structured-error-model.md`](seps/0000-structured-error-model.md)
+2. **#5 Idempotency & Transactions** (Extensions Track) — see [`seps/0000-idempotency-and-transactions.md`](seps/0000-idempotency-and-transactions.md)
+3. **#6 Human-in-the-Loop** (Extensions Track) — see [`seps/0000-human-in-the-loop-confirmation.md`](seps/0000-human-in-the-loop-confirmation.md)
+
+### Community Contributions Welcome
+
 - **Security review** of the session state and transaction models
-
-Feedback, counter-proposals, and prioritization input are welcome. The goal is to move MCP from "convenient data interface" to "robust orchestration protocol for AI agents" — and I believe these 15 extensions are the right next step.
+- **Co-implementation** — if you maintain an MCP server and would implement any of these extensions, please open an issue
+- **Feedback and counter-proposals** — the goal is to improve the MCP ecosystem, not to be right about every design choice
 
 ## Flows
 

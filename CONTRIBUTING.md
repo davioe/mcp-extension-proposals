@@ -6,20 +6,21 @@ Thank you for your interest in improving these MCP extension proposals. Contribu
 
 Check the [coverage matrix](examples/README.md#coverage-matrix) to see which proposals still lack schemas or implementations. High-impact areas:
 
-| Area | What's Missing |
+All 15 proposals now have schemas and reference implementations. Areas where contributions would be most valuable:
+
+| Area | What's Needed |
 |------|---------------|
-| Proposal #9 (Data References) | Reference implementation (Python, TypeScript) |
-| Proposal #10 (Multimodal Signatures) | Reference implementation |
-| Proposal #12 (Conformance Test Suite) | Everything — schema, test runner, validation logic |
-| Proposal #13 (Server Discovery) | Reference implementation |
-| Proposal #15 (Bidirectional Push) | Reference implementation |
-| Example Manifests | Slack, Linear, Notion, or other real-world servers |
+| Security review | Session state (#14) and transaction (#5) models need adversarial analysis |
+| Co-implementation | MCP server authors willing to implement these extensions in real servers |
+| Conformance test runner | A real test runner (beyond the demo) that validates servers against the conformance schema |
+| Additional manifests | Real-world servers beyond the current 5 (GitHub, Jira, Slack, Linear, Notion) |
+| SEP feedback | Review of the prepared SEP documents in `seps/` |
 
 ## Guidelines
 
 ### Schemas
 
-- Use [JSON Schema Draft-07](https://json-schema.org/draft-07/json-schema-release-notes.html) for consistency with existing schemas
+- Use [JSON Schema 2020-12](https://json-schema.org/draft/2020-12/release-notes) for consistency with existing schemas and the MCP specification (per SEP-1613)
 - Place schema files in `schemas/` with the naming pattern `<feature>.schema.json`
 - Include a `$schema`, `$id`, `title`, and `description` at the top level
 - Use `$defs` for sub-definitions rather than inline schemas
@@ -52,7 +53,9 @@ To validate all manifests and schemas locally:
 node scripts/validate-schemas.js
 ```
 
-This checks that all example manifests conform to the service manifest schema and that all schemas are valid JSON Schema Draft-07.
+This checks that all example manifests conform to the service manifest schema and that all schemas are valid JSON Schema 2020-12.
+
+CI runs this validation automatically on every push and pull request via GitHub Actions.
 
 ## License
 

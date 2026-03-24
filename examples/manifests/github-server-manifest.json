@@ -3,7 +3,7 @@
   "server": {
     "name": "github-mcp-server",
     "version": "3.1.0",
-    "mcp_spec_version": "2026-01-01",
+    "mcp_spec_version": "2025-11-25",
     "description": "MCP server for GitHub — repositories, issues, pull requests, and actions.",
     "homepage": "https://github.com/example/github-mcp-server"
   },

@@ -7,8 +7,11 @@ This directory contains schemas, reference implementations, and realistic exampl
 ```
 examples/
 ├── manifests/                        # Real-world example manifests
+│   ├── github-server-manifest.json   # Full manifest for a GitHub MCP server
 │   ├── jira-server-manifest.json     # Full manifest for a Jira MCP server
-│   └── github-server-manifest.json   # Full manifest for a GitHub MCP server
+│   ├── slack-server-manifest.json    # Full manifest for a Slack MCP server
+│   ├── linear-server-manifest.json   # Full manifest for a Linear MCP server
+│   └── notion-server-manifest.json   # Full manifest for a Notion MCP server
 ├── python/
 │   └── server.py                     # Python reference implementation
 └── typescript/
@@ -22,12 +25,14 @@ schemas/
 ├── transactions.schema.json          # Idempotency & transactions (Proposal #5)
 ├── provenance.schema.json            # Source attribution (Proposal #7)
 ├── data-references.schema.json       # Data references (Proposal #9)
-└── subscribe-notify.schema.json      # Subscribe/notify (Proposal #15)
+├── subscribe-notify.schema.json      # Subscribe/notify (Proposal #15)
+├── conformance.schema.json           # Conformance test suite (Proposal #12)
+└── session-state.schema.json         # Session state tokens (Proposal #14)
 ```
 
 ## Schemas
 
-All schemas are [JSON Schema Draft-07](https://json-schema.org/draft-07/json-schema-release-notes.html) and can be used for validation, code generation, and documentation.
+All schemas are [JSON Schema 2020-12](https://json-schema.org/draft/2020-12/release-notes) (aligned with the MCP specification per SEP-1613) and can be used for validation, code generation, and documentation.
 
 | Schema | Covers Proposals | Description |
 |--------|-----------------|-------------|
@@ -48,19 +53,19 @@ All schemas are [JSON Schema Draft-07](https://json-schema.org/draft-07/json-sch
 | 2. Intent Hints | ✅ (in manifest) | ✅ | ✅ | — |
 | 3. Cost Transparency | ✅ (in manifest) | ✅ | ✅ | ✅ |
 | 4. Scoped Auth | ✅ | ✅ | ✅ | ✅ |
-| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | — |
+| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | ✅ |
 | 6. Human-in-the-Loop | ✅ (in manifest) | ✅ | ✅ | ✅ |
-| 7. Provenance | ✅ | ✅ | ✅ | — |
+| 7. Provenance | ✅ | ✅ | ✅ | ✅ |
 | 8. Streaming & Progress | ✅ | ✅ | ✅ | ✅ |
-| 9. Data References | ✅ | — | — | — |
-| 10. Multimodal Signatures | ✅ (in manifest) | — | — | — |
-| 11. Structured Errors | ✅ | ✅ | ✅ | — |
-| 12. Conformance Suite | — | — | — | — |
-| 13. Server Discovery | ✅ (in manifest) | — | — | ✅ |
-| 14. Session State | — | ✅ | ✅ | — |
-| 15. Bidirectional Push | ✅ | — | — | — |
+| 9. Data References | ✅ | ✅ | ✅ | ✅ |
+| 10. Multimodal Signatures | ✅ (in manifest) | ✅ | ✅ | ✅ |
+| 11. Structured Errors | ✅ | ✅ | ✅ | ✅ |
+| 12. Conformance Suite | ✅ | ✅ | ✅ | — |
+| 13. Server Discovery | ✅ (in manifest) | ✅ | ✅ | ✅ |
+| 14. Session State | ✅ | ✅ | ✅ | — |
+| 15. Bidirectional Push | ✅ | ✅ | ✅ | — |
 
-Proposals marked "—" are specified in the main proposal document but don't have standalone schemas or implementations yet. Contributions welcome.
+**Full coverage achieved:** All 15 proposals have schemas and reference implementations in both Python and TypeScript.
 
 ## Reference Implementations
 
@@ -97,21 +102,29 @@ Both demos walk through this sequence:
 7. **Transaction + Rollback** — Multi-step operation with compensation on failure
 8. **Session State** — Opaque state token carried between calls
 9. **Structured Error** — Machine-readable error with category and suggestion
+10. **Data References** — Opaque reference passed between servers without client buffering
+11. **Multimodal Signatures** — Tool with typed binary input/output and MIME declarations
+12. **Conformance Check** — Mini test suite validates server against spec
+13. **Server Discovery** — Query for capabilities, get ranked recommendations
+14. **Event Subscriptions** — Subscribe to domain events, receive notifications, unsubscribe
 
 ## Example Manifests
 
 The `manifests/` directory contains realistic, fully populated manifests for:
 
-- **Jira** — Issue tracking with sprints, analytics, and tiered permissions
 - **GitHub** — Repositories, issues, PRs, and code search
+- **Jira** — Issue tracking with sprints, analytics, and tiered permissions
+- **Slack** — Messaging, channels, file uploads, and event subscriptions
+- **Linear** — Issue tracking with idempotency, transactions, and structured errors
+- **Notion** — Pages, databases, data references, and provenance
 
-These show how the proposed schema applies to real-world servers with complex permission models, destructive operations, metered costs, and cross-server recommendations.
+Each manifest showcases different extension combinations to demonstrate flexibility. Together they cover all 15 proposed extensions.
 
 ## Contributing
 
 To add a new example manifest, schema, or implementation:
 
 1. Follow the existing file naming conventions
-2. Validate schemas against Draft-07
+2. Validate schemas against JSON Schema 2020-12
 3. Ensure manifests validate against `schemas/service-manifest.schema.json`
 4. Add coverage info to the matrix above

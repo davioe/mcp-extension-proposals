@@ -1,0 +1,31 @@
+name: Validate Schemas & Manifests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate JSON files are well-formed
+        run: |
+          echo "Checking all JSON files..."
+          find schemas/ examples/ -name '*.json' -print0 | while IFS= read -r -d '' file; do
+            if ! node -e "JSON.parse(require('fs').readFileSync('$file', 'utf-8'))"; then
+              echo "FAIL: $file is not valid JSON"
+              exit 1
+            fi
+          done
+          echo "All JSON files are well-formed."
+
+      - name: Run schema validation
+        run: node scripts/validate-schemas.js

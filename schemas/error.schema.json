@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mcp-extension-proposals.github.io/schemas/error.json",
   "title": "MCP Structured Error",
   "description": "A standardized error response format that enables clients to react intelligently — retry, inform the user, or try an alternative approach.",

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/conformance.json",
+  "title": "MCP Conformance Test Suite",
+  "description": "Schemas for validating MCP server implementations against the specification through structured test cases and conformance reports.",
+  "oneOf": [
+    {
+      "title": "Test Suite Document",
+      "type": "object",
+      "required": ["metadata", "tests"],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/TestSuiteMetadata"
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestCase"
+          }
+        }
+      }
+    },
+    {
+      "$ref": "#/$defs/ConformanceReport"
+    }
+  ],
+  "$defs": {
+    "TestCase": {
+      "title": "Test Case",
+      "description": "A single conformance test that validates a specific aspect of an MCP server implementation.",
+      "type": "object",
+      "required": ["test_id", "proposal_ref", "description"],
+      "properties": {
+        "test_id": {
+          "type": "string",
+          "description": "Unique identifier for the test case."
+        },
+        "proposal_ref": {
+          "type": "string",
+          "description": "Reference to the proposal being tested.",
+          "examples": ["proposal-5", "proposal-12"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this test validates."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["manifest", "error_handling", "idempotency", "permissions", "streaming", "transactions"],
+          "description": "The area of MCP functionality being tested."
+        },
+        "input": {
+          "type": "object",
+          "description": "The input payload to send to the server under test."
+        },
+        "expected_output": {
+          "type": "object",
+          "description": "The expected output used to evaluate the server response."
+        },
+        "assertion_type": {
+          "type": "string",
+          "enum": ["exact_match", "schema_match", "status_code", "contains"],
+          "description": "How the actual output should be compared against the expected output."
+        }
+      }
+    },
+    "TestSuiteMetadata": {
+      "title": "Test Suite Metadata",
+      "description": "Metadata describing the conformance test suite.",
+      "type": "object",
+      "required": ["suite_version", "mcp_spec_version"],
+      "properties": {
+        "suite_version": {
+          "type": "string",
+          "description": "Version of the conformance test suite."
+        },
+        "mcp_spec_version": {
+          "type": "string",
+          "description": "Version of the MCP specification being tested against."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the test suite was created."
+        },
+        "total_tests": {
+          "type": "integer",
+          "description": "Total number of test cases in the suite."
+        }
+      }
+    },
+    "ConformanceReport": {
+      "title": "Conformance Report",
+      "description": "A report summarizing the results of running the conformance test suite against an MCP server.",
+      "type": "object",
+      "required": ["server_name", "server_version", "suite_version", "tested_at", "results"],
+      "properties": {
+        "server_name": {
+          "type": "string",
+          "description": "Name of the MCP server that was tested."
+        },
+        "server_version": {
+          "type": "string",
+          "description": "Version of the MCP server that was tested."
+        },
+        "suite_version": {
+          "type": "string",
+          "description": "Version of the conformance test suite that was run."
+        },
+        "tested_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the test suite was executed."
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestResult"
+          },
+          "description": "Individual results for each test case."
+        },
+        "summary": {
+          "type": "object",
+          "description": "Aggregate counts of test outcomes.",
+          "properties": {
+            "passed": {
+              "type": "integer"
+            },
+            "failed": {
+              "type": "integer"
+            },
+            "skipped": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "TestResult": {
+      "title": "Test Result",
+      "description": "The outcome of a single test case execution.",
+      "type": "object",
+      "required": ["test_id"],
+      "properties": {
+        "test_id": {
+          "type": "string",
+          "description": "Identifier of the test case that was executed."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped", "error"],
+          "description": "Outcome of the test case."
+        },
+        "message": {
+          "type": "string",
+          "description": "Additional detail about the test outcome, especially on failure or error."
+        },
+        "duration_ms": {
+          "type": "number",
+          "description": "Time in milliseconds the test took to execute."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcp-extension-proposals.github.io/schemas/session-state.json",
+  "title": "MCP Session State",
+  "description": "Schemas for managing opaque session state tokens across tool calls, enabling stateful interactions without exposing internal server state.",
+  "oneOf": [
+    { "$ref": "#/$defs/SessionState" },
+    { "$ref": "#/$defs/StateUpdateRequest" },
+    { "$ref": "#/$defs/StateUpdateResponse" },
+    { "$ref": "#/$defs/SessionLifecycleEvent" }
+  ],
+  "$defs": {
+    "SessionState": {
+      "title": "Session State",
+      "description": "Represents a session with an opaque state token that persists across tool calls.",
+      "type": "object",
+      "required": ["session_id", "state", "created_at"],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "Unique identifier for the session."
+        },
+        "state": {
+          "type": "string",
+          "description": "Base64-encoded opaque state token."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the session was created."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the session expires."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional context about the session.",
+          "properties": {
+            "server_name": {
+              "type": "string",
+              "description": "Name of the server that owns this session."
+            },
+            "tool_context": {
+              "type": "string",
+              "description": "The tool context associated with this session."
+            }
+          }
+        }
+      }
+    },
+    "StateUpdateRequest": {
+      "title": "State Update Request",
+      "description": "A tool call that includes session state for continuity across invocations.",
+      "type": "object",
+      "required": ["tool"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "Name of the tool to invoke."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Parameters to pass to the tool."
+        },
+        "session_state": {
+          "type": "string",
+          "description": "Opaque state token from previous response."
+        }
+      }
+    },
+    "StateUpdateResponse": {
+      "title": "State Update Response",
+      "description": "A tool response that includes an updated session state token.",
+      "type": "object",
+      "required": ["result"],
+      "properties": {
+        "result": {
+          "type": "object",
+          "description": "The tool execution result."
+        },
+        "session_state": {
+          "type": "string",
+          "description": "Updated state token for next call."
+        },
+        "state_changed": {
+          "type": "boolean",
+          "description": "Whether the session state was modified by this call."
+        }
+      }
+    },
+    "SessionLifecycleEvent": {
+      "title": "Session Lifecycle Event",
+      "description": "An event representing a change in session lifecycle.",
+      "type": "object",
+      "required": ["type", "session_id", "timestamp"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["session_created", "session_renewed", "session_expired", "session_invalidated"],
+          "description": "The lifecycle event type."
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Identifier of the session this event pertains to."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the event occurred."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional explanation for the lifecycle event."
+        }
+      }
+    }
+  }
+}

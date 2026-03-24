@@ -771,7 +771,335 @@ async def demo():
     print(f"Error: {json.dumps(result, indent=2)}")
 
     print("\n" + "=" * 70)
-    print("Demo complete.")
+    print("Demo complete (core extensions).")
+
+    # Additional proposal demos
+    await demo_data_references()
+    await demo_multimodal_signatures()
+    await demo_conformance_check()
+    await demo_server_discovery()
+    await demo_subscription()
+
+    print("\n" + "=" * 70)
+    print("All demos complete.")
+
+
+# =============================================================================
+# Extension 9: Data References
+# =============================================================================
+
+async def demo_data_references():
+    """Demonstrate cross-server data references (Proposal #9)."""
+    print("\n--- 11. Data References (Proposal #9) ---")
+
+    # Server A exports data and returns a reference
+    async def server_a_export(dataset: str) -> dict:
+        """Simulate Server A exporting data and returning a reference."""
+        ref_id = f"ref-{uuid.uuid4().hex[:12]}"
+        data_payload = json.dumps({"tickets": [vars(t) for t in list(TICKETS.values())[:2]]})
+        checksum = f"sha256:{uuid.uuid4().hex}"  # Simulated checksum
+        return {
+            "ref_id": ref_id,
+            "origin_server": "project-tracker-mcp",
+            "mime_type": "application/json",
+            "size_bytes": len(data_payload.encode()),
+            "expires_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "") + "Z",
+            "access_url": f"https://project-tracker.example.com/refs/{ref_id}",
+            "checksum": checksum,
+        }
+
+    # Client obtains the reference from Server A
+    reference = await server_a_export("open_tickets")
+    print(f"Server A returned reference: {reference['ref_id']}")
+    print(f"  origin_server: {reference['origin_server']}")
+    print(f"  mime_type: {reference['mime_type']}, size_bytes: {reference['size_bytes']}")
+    print(f"  access_url: {reference['access_url']}")
+
+    # Server B imports data using the reference
+    async def server_b_import(ref: dict) -> dict:
+        """Simulate Server B importing data via reference."""
+        # In a real implementation, Server B would fetch from access_url
+        return {
+            "status": "imported",
+            "ref_id": ref["ref_id"],
+            "origin_server": ref["origin_server"],
+            "records_imported": 2,
+            "checksum_verified": True,
+        }
+
+    import_result = await server_b_import(reference)
+    print(f"Server B import result: status={import_result['status']}, "
+          f"records={import_result['records_imported']}, "
+          f"checksum_verified={import_result['checksum_verified']}")
+
+
+# =============================================================================
+# Extension 10: Multimodal Tool Signatures
+# =============================================================================
+
+async def demo_multimodal_signatures():
+    """Demonstrate multimodal tool signatures (Proposal #10)."""
+    print("\n--- 12. Multimodal Tool Signatures (Proposal #10) ---")
+
+    # Define a tool with explicit input/output type annotations
+    tool_definition = {
+        "name": "analyze_image",
+        "description": "Analyze an image and return structured JSON results.",
+        "input_types": ["image/png", "image/jpeg"],
+        "output_types": ["application/json"],
+        "max_input_size_bytes": 10 * 1024 * 1024,  # 10 MB
+        "input_schema": {
+            "type": "object",
+            "required": ["image_data", "analysis_type"],
+            "properties": {
+                "image_data": {"type": "string", "description": "Base64-encoded image"},
+                "analysis_type": {"type": "string", "enum": ["labels", "objects", "text"]},
+            },
+        },
+    }
+
+    print(f"Tool: {tool_definition['name']}")
+    print(f"  Accepts: {', '.join(tool_definition['input_types'])}")
+    print(f"  Returns: {', '.join(tool_definition['output_types'])}")
+    print(f"  Max input size: {tool_definition['max_input_size_bytes']} bytes")
+
+    # Simulate a client calling this tool with a binary payload
+    fake_image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64  # Minimal PNG-like header
+    request_payload = {
+        "tool": "analyze_image",
+        "parameters": {
+            "image_data": base64.b64encode(fake_image_bytes).decode(),
+            "analysis_type": "labels",
+        },
+        "content_type": "image/png",
+    }
+
+    print(f"  Client sends {len(fake_image_bytes)} bytes as {request_payload['content_type']}")
+
+    # Simulate the tool returning a structured JSON result
+    analysis_result = {
+        "labels": [
+            {"name": "architecture_diagram", "confidence": 0.92},
+            {"name": "flowchart", "confidence": 0.87},
+            {"name": "technical_drawing", "confidence": 0.65},
+        ],
+        "image_dimensions": {"width": 1024, "height": 768},
+        "analysis_type": "labels",
+    }
+
+    print(f"  Result: {json.dumps(analysis_result, indent=4)}")
+
+
+# =============================================================================
+# Extension 12: Conformance Check
+# =============================================================================
+
+async def demo_conformance_check():
+    """Demonstrate a conformance test suite (Proposal #12)."""
+    print("\n--- 13. Conformance Check (Proposal #12) ---")
+
+    # Define a mini test suite
+    test_suite = [
+        {
+            "test_id": "CONF-001",
+            "description": "Server returns a valid manifest on get_manifest",
+            "request": {"tool": "get_manifest"},
+            "expected": lambda r: "server" in r and "tools" in r,
+        },
+        {
+            "test_id": "CONF-002",
+            "description": "Permission check returns allowed=True for granted scope",
+            "request": {"tool": "check_permissions", "parameters": {"tool": "search_tickets"}},
+            "expected": lambda r: r.get("allowed") is True,
+        },
+        {
+            "test_id": "CONF-003",
+            "description": "Permission check returns allowed=False for missing scope",
+            "request": {"tool": "check_permissions", "parameters": {"tool": "delete_ticket"}},
+            "expected": lambda r: r.get("allowed") is False,
+        },
+        {
+            "test_id": "CONF-004",
+            "description": "Structured error returned for unknown tool",
+            "request": {"tool": "nonexistent_tool", "parameters": {}},
+            "expected": lambda r: "error" in r and r["error"]["code"] == "SCOPE_INSUFFICIENT" or "error" in r,
+        },
+    ]
+
+    # Run tests against the mock server
+    passed = 0
+    failed = 0
+    results = []
+
+    for test in test_suite:
+        response = await handle_request(test["request"])
+        success = test["expected"](response)
+        status = "PASSED" if success else "FAILED"
+        if success:
+            passed += 1
+        else:
+            failed += 1
+        results.append({"test_id": test["test_id"], "status": status, "description": test["description"]})
+        print(f"  [{status}] {test['test_id']}: {test['description']}")
+
+    # Produce conformance report
+    report = {
+        "conformance_report": {
+            "server": "project-tracker-mcp",
+            "total_tests": len(test_suite),
+            "passed": passed,
+            "failed": failed,
+            "pass_rate": f"{(passed / len(test_suite)) * 100:.0f}%",
+            "results": results,
+        }
+    }
+    print(f"  Report: {passed}/{len(test_suite)} passed ({report['conformance_report']['pass_rate']})")
+
+
+# =============================================================================
+# Extension 13: Server Discovery
+# =============================================================================
+
+async def demo_server_discovery():
+    """Demonstrate server discovery (Proposal #13)."""
+    print("\n--- 14. Server Discovery (Proposal #13) ---")
+
+    # Simulated registry of known servers
+    registry = [
+        {
+            "server_name": "figma-mcp",
+            "description": "Design tool integration for creating and editing mockups.",
+            "capabilities": ["design_mockup", "export_assets", "design_system"],
+            "registry_url": "https://registry.mcp.example.com/servers/figma-mcp",
+            "auth_flow": "oauth2_authorization_code",
+            "version": "2.3.0",
+        },
+        {
+            "server_name": "canva-mcp",
+            "description": "Quick design mockups and social media graphics.",
+            "capabilities": ["design_mockup", "social_media_graphics"],
+            "registry_url": "https://registry.mcp.example.com/servers/canva-mcp",
+            "auth_flow": "api_key",
+            "version": "1.1.0",
+        },
+        {
+            "server_name": "miro-mcp",
+            "description": "Collaborative whiteboarding and diagramming.",
+            "capabilities": ["whiteboard", "diagramming", "design_mockup"],
+            "registry_url": "https://registry.mcp.example.com/servers/miro-mcp",
+            "auth_flow": "oauth2_device",
+            "version": "3.0.1",
+        },
+    ]
+
+    # Query for a capability
+    capability_needed = "design_mockup"
+    print(f"Searching for servers with capability: '{capability_needed}'")
+
+    recommendations = []
+    for server in registry:
+        if capability_needed in server["capabilities"]:
+            # Compute a simple match confidence based on capability relevance
+            total_caps = len(server["capabilities"])
+            match_confidence = round(1.0 / total_caps, 2)  # Higher if more focused
+            recommendations.append({
+                "server_name": server["server_name"],
+                "registry_url": server["registry_url"],
+                "auth_flow": server["auth_flow"],
+                "match_confidence": match_confidence,
+            })
+
+    # Sort by confidence descending
+    recommendations.sort(key=lambda r: r["match_confidence"], reverse=True)
+
+    for rec in recommendations:
+        print(f"  Recommended: {rec['server_name']} "
+              f"(confidence={rec['match_confidence']}, auth={rec['auth_flow']})")
+        print(f"    registry_url: {rec['registry_url']}")
+
+    # Show how a client would connect to the top recommendation
+    if recommendations:
+        top = recommendations[0]
+        print(f"\n  Client would connect to '{top['server_name']}' via:")
+        print(f"    1. Fetch manifest from {top['registry_url']}/manifest")
+        print(f"    2. Authenticate using {top['auth_flow']}")
+        print(f"    3. Call tools with capability '{capability_needed}'")
+
+
+# =============================================================================
+# Extension 15: Subscriptions
+# =============================================================================
+
+async def demo_subscription():
+    """Demonstrate event subscriptions (Proposal #15)."""
+    print("\n--- 15. Event Subscriptions (Proposal #15) ---")
+
+    # In-memory subscription manager
+    subscriptions: dict[str, dict] = {}
+
+    async def subscribe(events: list[str], filter_params: dict | None = None) -> dict:
+        """Subscribe to server-sent events."""
+        sub_id = f"sub-{uuid.uuid4().hex[:8]}"
+        subscriptions[sub_id] = {
+            "subscription_id": sub_id,
+            "events": events,
+            "filter": filter_params or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "active",
+        }
+        return subscriptions[sub_id]
+
+    async def emit_event(sub_id: str, event_type: str, payload: dict) -> dict:
+        """Simulate emitting an event notification to a subscriber."""
+        return {
+            "subscription_id": sub_id,
+            "event_type": event_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": payload,
+        }
+
+    async def unsubscribe(sub_id: str) -> dict:
+        """Cancel a subscription."""
+        if sub_id in subscriptions:
+            subscriptions[sub_id]["status"] = "cancelled"
+            return {"subscription_id": sub_id, "status": "cancelled"}
+        return {"error": "subscription_not_found", "subscription_id": sub_id}
+
+    # Subscribe to events
+    sub = await subscribe(
+        events=["commit_to_main", "pr_review_requested"],
+        filter_params={"repo": "example/project-tracker-mcp", "branch": "main"},
+    )
+    print(f"Subscribed: {sub['subscription_id']}")
+    print(f"  Events: {sub['events']}")
+    print(f"  Filter: {sub['filter']}")
+
+    # Simulate receiving event notifications
+    events_received = [
+        await emit_event(sub["subscription_id"], "commit_to_main", {
+            "commit_sha": "a1b2c3d",
+            "author": "alice",
+            "message": "Fix login redirect loop",
+        }),
+        await emit_event(sub["subscription_id"], "pr_review_requested", {
+            "pr_number": 142,
+            "title": "Add dark mode support",
+            "reviewer": "bob",
+        }),
+        await emit_event(sub["subscription_id"], "commit_to_main", {
+            "commit_sha": "e4f5g6h",
+            "author": "charlie",
+            "message": "Update CI pipeline config",
+        }),
+    ]
+
+    for evt in events_received:
+        print(f"  Event: {evt['event_type']} at {evt['timestamp']}")
+        print(f"    Payload: {evt['payload']}")
+
+    # Unsubscribe
+    unsub = await unsubscribe(sub["subscription_id"])
+    print(f"Unsubscribed: {unsub['subscription_id']}, status={unsub['status']}")
 
 
 if __name__ == "__main__":

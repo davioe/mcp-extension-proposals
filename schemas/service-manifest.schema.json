@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mcp-extension-proposals.github.io/schemas/service-manifest.json",
   "title": "MCP Service Manifest",
   "description": "A standardized manifest that every MCP server exposes at connection time, describing its capabilities, tools, authentication, rate limits, and supported protocol extensions.",
@@ -65,7 +65,10 @@
           "human_in_the_loop",
           "data_references",
           "subscribe_notify",
-          "server_recommendations"
+          "server_recommendations",
+          "structured_errors",
+          "multimodal_signatures",
+          "conformance"
         ]
       },
       "description": "Which optional MCP extensions this server supports."

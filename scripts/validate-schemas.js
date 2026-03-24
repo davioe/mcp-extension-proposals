@@ -9,7 +9,7 @@
  * 3. Example manifests conform to the service-manifest schema structure
  *
  * No external dependencies required — uses only Node.js built-ins.
- * For full JSON Schema Draft-07 validation, consider using `ajv`.
+ * For full JSON Schema 2020-12 validation, consider using `ajv`.
  *
  * Usage:
  *   node scripts/validate-schemas.js

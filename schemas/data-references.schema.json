@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mcp-extension-proposals.github.io/schemas/data-references.json",
   "title": "MCP Data References",
   "description": "Schemas for passing opaque data references between servers, enabling direct server-to-server data transfer without routing through the client context.",

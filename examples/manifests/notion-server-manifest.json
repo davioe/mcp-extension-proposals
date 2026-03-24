@@ -1,0 +1,179 @@
+{
+  "manifest_version": "0.1.0",
+  "server": {
+    "name": "notion-mcp-server",
+    "version": "2.0.0",
+    "mcp_spec_version": "2025-11-25",
+    "description": "MCP server for Notion — pages, databases, blocks, and collaborative content management.",
+    "homepage": "https://github.com/example/notion-mcp-server"
+  },
+  "auth": {
+    "methods": ["oauth2_code", "bearer_token"],
+    "scopes": [
+      { "name": "read:pages", "description": "View pages and page content", "grants": ["search_pages", "get_page"] },
+      { "name": "write:pages", "description": "Create and edit pages", "grants": ["create_page", "archive_page"] },
+      { "name": "read:databases", "description": "View databases and query entries", "grants": ["list_databases", "query_database", "export_database"] },
+      { "name": "write:databases", "description": "Create and modify databases", "grants": ["create_database"] },
+      { "name": "read:blocks", "description": "View block content within pages", "grants": ["get_block", "list_blocks"] },
+      { "name": "write:blocks", "description": "Create and edit blocks within pages", "grants": ["append_block", "update_block"] },
+      { "name": "read:comments", "description": "View comments on pages and blocks", "grants": ["list_comments"] }
+    ],
+    "session_ttl_seconds": 3600
+  },
+  "tools": [
+    {
+      "name": "search_pages",
+      "description": "Search Notion pages by title or content.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query text" },
+          "filter": {
+            "type": "object",
+            "properties": {
+              "object_type": { "type": "string", "enum": ["page", "database"], "description": "Filter by object type" },
+              "parent_id": { "type": "string", "description": "Filter by parent page or database ID" }
+            }
+          },
+          "sort": {
+            "type": "object",
+            "properties": {
+              "direction": { "type": "string", "enum": ["ascending", "descending"] },
+              "timestamp": { "type": "string", "enum": ["last_edited_time", "created_time"] }
+            }
+          },
+          "page_size": { "type": "integer", "default": 25, "maximum": 100 }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:pages"],
+      "supports_pagination": true
+    },
+    {
+      "name": "create_page",
+      "description": "Create a new page in Notion under a specified parent page or database.",
+      "input_schema": {
+        "type": "object",
+        "required": ["parent_id", "title"],
+        "properties": {
+          "parent_id": { "type": "string", "description": "Parent page or database ID" },
+          "title": { "type": "string" },
+          "icon": { "type": "string", "description": "Emoji or external URL for the page icon" },
+          "cover": { "type": "string", "description": "External URL for the cover image" },
+          "content": {
+            "type": "array",
+            "items": { "type": "object" },
+            "description": "Array of block objects to populate the page"
+          },
+          "properties": {
+            "type": "object",
+            "description": "Database properties if the parent is a database"
+          }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["write:pages"]
+    },
+    {
+      "name": "export_database",
+      "description": "Export an entire Notion database including all entries and properties. Supports JSON and CSV formats.",
+      "input_schema": {
+        "type": "object",
+        "required": ["database_id"],
+        "properties": {
+          "database_id": { "type": "string" },
+          "format": { "type": "string", "enum": ["json", "csv"], "default": "json" },
+          "filter": {
+            "type": "object",
+            "description": "Optional filter to limit exported entries"
+          },
+          "include_content": { "type": "boolean", "default": false, "description": "Include full page content for each entry" }
+        }
+      },
+      "cost": { "category": "metered", "estimated_units": 10, "unit_label": "API credits" },
+      "latency": "minutes",
+      "idempotent": true,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["read:databases"],
+      "supports_streaming": true
+    },
+    {
+      "name": "upload_image",
+      "description": "Upload an image to a Notion page as a block.",
+      "input_schema": {
+        "type": "object",
+        "required": ["page_id", "image_url"],
+        "properties": {
+          "page_id": { "type": "string", "description": "Target page ID" },
+          "image_url": { "type": "string", "description": "External URL of the image to embed" },
+          "caption": { "type": "string" },
+          "position": { "type": "string", "enum": ["append", "prepend"], "default": "append" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "seconds",
+      "idempotent": false,
+      "requires_confirmation": false,
+      "risk_level": "safe",
+      "required_scopes": ["write:blocks"]
+    },
+    {
+      "name": "archive_page",
+      "description": "Archive a Notion page. Archived pages can be restored later.",
+      "input_schema": {
+        "type": "object",
+        "required": ["page_id"],
+        "properties": {
+          "page_id": { "type": "string", "description": "Page ID to archive" }
+        }
+      },
+      "cost": { "category": "free" },
+      "latency": "instant",
+      "idempotent": true,
+      "requires_confirmation": true,
+      "confirmation_message": "This will archive the page and remove it from the workspace view. The page can be restored later. Proceed?",
+      "risk_level": "reversible",
+      "required_scopes": ["write:pages"]
+    }
+  ],
+  "supported_extensions": [
+    "streaming",
+    "progress_notifications",
+    "idempotency",
+    "session_state",
+    "provenance",
+    "data_references",
+    "intent_hints"
+  ],
+  "rate_limits": {
+    "requests_per_minute": 90,
+    "requests_per_day": 25000,
+    "remaining": 24612,
+    "resets_at": "2026-03-26T00:00:00Z"
+  },
+  "recommendations": [
+    {
+      "capability": "file_storage",
+      "server_name": "google-drive-mcp",
+      "registry_url": "https://mcp-registry.example.com/servers/google-drive",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "high"
+    },
+    {
+      "capability": "team_messaging",
+      "server_name": "slack-mcp-server",
+      "registry_url": "https://mcp-registry.example.com/servers/slack",
+      "auth_flow": "oauth2_code",
+      "match_confidence": "medium"
+    }
+  ]
+}
