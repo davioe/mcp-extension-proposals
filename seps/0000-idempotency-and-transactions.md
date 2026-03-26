@@ -2,11 +2,15 @@
 
 | Field | Value |
 |-------|-------|
+| **SEP Number** | 0000 |
 | **Title** | Idempotency Keys and Compensation-Based Transactions |
 | **Author** | davioe |
+| **Sponsor** | *(to be assigned)* |
 | **Status** | Draft |
 | **Type** | Extensions Track |
 | **Created** | 2026-03-25 |
+| **Specification** | MCP 2025-11-25 |
+| **Discussion** | *(link to PR when submitted)* |
 
 ## Abstract
 
@@ -180,9 +184,13 @@ Both mechanisms are fully opt-in:
 
 ## Reference Implementation
 
-- Python: `examples/python/server.py` — `IdempotencyStore` and `TransactionManager` classes, Steps 5 and 7 of the `demo()` function
-- TypeScript: `examples/typescript/server.ts` — `IdempotencyStore` and `TransactionManager` classes, Steps 5 and 7 of the `demo()` function
-- JSON Schema: `schemas/transactions.schema.json`
+Reference implementations in Python and TypeScript are available in the companion repository. The Python implementation includes an `IdempotencyStore` class for replay detection and a `TransactionManager` class for compensation-based rollback, exercised in Steps 5 (idempotent create) and 7 (transaction with rollback) of the demo sequence. The TypeScript implementation mirrors the same classes and demo steps. A separate HTTP-transport Saga demo validates cross-server coordination over real network boundaries with three independent servers.
+
+The transaction lifecycle and idempotency key schemas are defined in the transactions schema.
+
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/python/server.py
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/typescript/server.ts
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/schemas/transactions.schema.json
 
 ## Security Implications
 
@@ -246,6 +254,6 @@ Rollback (reverse order):
 ### Limitations
 
 - Cross-server Sagas are **best-effort**. The protocol cannot prevent a scenario where Server A's compensation succeeds but Server B's fails, leaving the system inconsistent.
-- The compensation log is ephemeral by default. Clients requiring durability must persist the log to their own backing store — this is outside the MCP protocol scope.
+- The compensation log is ephemeral by default. Clients requiring durability MUST persist the log to their own backing store — this is outside the MCP protocol scope.
 - Steps execute strictly sequentially (one server at a time). Concurrent cross-server steps are out of scope for v1 to simplify compensation ordering.
 - 2PC (two-phase commit) is infeasible because external SaaS APIs do not implement prepare/commit phases. The Saga pattern is the pragmatic alternative for MCP's architecture (client-orchestrated, server-executed).

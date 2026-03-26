@@ -53,7 +53,7 @@ All schemas are [JSON Schema 2020-12](https://json-schema.org/draft/2020-12/rele
 | 2. Intent Hints | ✅ (in manifest) | ✅ | ✅ | — | — |
 | 3. Cost Transparency | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
 | 4. Scoped Auth | ✅ | ✅ | ✅ | ✅ | — |
-| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | ✅ | saga_demo.py / saga-demo.ts (in-process Saga simulation) |
+| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | ✅ | saga_demo.py / saga-demo.ts (HTTP transport with 3 independent servers) |
 | 6. Human-in-the-Loop | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
 | 7. Provenance | ✅ | ✅ | ✅ | ✅ | — |
 | 8. Streaming & Progress | ✅ | ✅ | ✅ | ✅ | — |

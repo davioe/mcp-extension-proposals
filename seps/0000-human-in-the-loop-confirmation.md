@@ -2,11 +2,15 @@
 
 | Field | Value |
 |-------|-------|
+| **SEP Number** | 0000 |
 | **Title** | Human-in-the-Loop Confirmation Protocol |
 | **Author** | davioe |
+| **Sponsor** | *(to be assigned)* |
 | **Status** | Draft |
 | **Type** | Extensions Track |
 | **Created** | 2026-03-25 |
+| **Specification** | MCP 2025-11-25 |
+| **Discussion** | *(link to PR when submitted)* |
 
 ## Abstract
 
@@ -130,12 +134,16 @@ Fully backward-compatible:
 
 ## Reference Implementation
 
-- Python: `examples/python/server.py` — HITL logic in `handle_request()` and Step 6 of the `demo()` function
-- TypeScript: `examples/typescript/server.ts` — HITL logic in `handleRequest()` and Step 6 of the `demo()` function
-- Schema: `requires_confirmation`, `confirmation_message`, and `risk_level` fields in `schemas/service-manifest.schema.json`
+Reference implementations in Python and TypeScript are available in the companion repository. The Python implementation demonstrates the confirmation flow in a `handle_request()` function that checks the `requires_confirmation` flag and returns a `confirmation_required` status (Step 6 of the demo sequence). The TypeScript implementation mirrors the same logic in `handleRequest()`.
+
+The `requires_confirmation`, `confirmation_message`, and `risk_level` fields are defined in the service manifest schema.
+
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/python/server.py
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/typescript/server.ts
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/schemas/service-manifest.schema.json
 
 ## Security Implications
 
 - **Confirmation token expiry.** Tokens MUST expire after a short window (recommended: 5 minutes) to prevent replay attacks where a stale approval is used to execute a later destructive operation.
-- **Token binding.** Tokens MUST be bound to the specific tool call parameters — approving `delete_repository(name: "test-repo")` must not authorize `delete_repository(name: "production-db")`.
+- **Token binding.** Tokens MUST be bound to the specific tool call parameters — approving `delete_repository(name: "test-repo")` MUST NOT authorize `delete_repository(name: "production-db")`.
 - **Client trust.** The `user_confirmed: true` flag comes from the client. A malicious client could set this flag without actually prompting the user. Servers in high-security environments SHOULD use elicitation URL mode for an independent confirmation channel that bypasses the client.

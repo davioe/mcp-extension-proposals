@@ -2,11 +2,15 @@
 
 | Field | Value |
 |-------|-------|
+| **SEP Number** | 0000 |
 | **Title** | Structured Error Model |
 | **Author** | davioe |
+| **Sponsor** | *(to be assigned)* |
 | **Status** | Draft |
 | **Type** | Standards Track |
 | **Created** | 2026-03-25 |
+| **Specification** | MCP 2025-11-25 |
+| **Discussion** | *(link to PR when submitted)* |
 
 ## Abstract
 
@@ -118,11 +122,13 @@ This proposal is fully backward-compatible:
 
 ## Reference Implementation
 
-Reference implementations in Python and TypeScript are available at:
-- `examples/python/server.py` — structured error handling in the `StructuredError` class and Step 9 of the `demo()` function
-- `examples/typescript/server.ts` — structured error handling in the `StructuredError` class and Step 9 of the `demo()` function
+Reference implementations in Python and TypeScript are available in the companion repository. The Python implementation includes a `StructuredError` class that produces machine-readable error responses with category, retry semantics, and remediation suggestions, exercised in Step 9 of the demo sequence. The TypeScript implementation mirrors the same class and demo step.
 
-The JSON Schema for the error model is at `schemas/error.schema.json`.
+The JSON Schema for the error model defines the full error response structure including all fields specified above.
+
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/python/server.py
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/examples/typescript/server.ts
+Source: https://github.com/davioe/mcp-extension-proposals/blob/main/schemas/error.schema.json
 
 ## Security Implications
 

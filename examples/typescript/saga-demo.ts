@@ -1,27 +1,57 @@
 /**
- * Cross-Server Saga Orchestration Demo (TypeScript)
+ * Cross-Server Saga Orchestration Demo (TypeScript) — Real HTTP Transport
  *
  * Demonstrates the client-side Saga pattern described in SEP-0000 (Cross-Server
  * Coordination section).  A SagaOrchestrator drives a multi-step workflow across
- * simulated MCP servers, compensating completed steps on failure.
+ * three independent HTTP MCP servers, compensating completed steps on failure.
  *
  * Scenario A: All compensations succeed (clean rollback).
- * Scenario B: One compensation fails (partial rollback).
+ * Scenario B: One compensation fails because a server is shut down mid-rollback
+ *             (ECONNREFUSED -> compensation_failed).
  *
- * NOTE: The three "servers" (jira-server, confluence-server, slack-server) are
- * simulated by routing every call through the same processJsonRpc() function.
- * They share one ticket store.  In a real deployment each serverId would
- * correspond to a separate MCP server connection.
+ * Three real HTTP servers run on random ports:
+ *   - Jira server:       owns its own ticket store, supports create_ticket / delete_ticket
+ *   - Confluence server:  owns its own ticket store, supports create_ticket / delete_ticket
+ *   - Slack server:       returns JSON-RPC -32601 "Method not found" for any tools/call
  *
  * No external dependencies.  Usage:
  *   npx tsx saga-demo.ts
  */
 
+import * as http from "http";
+import * as crypto from "crypto";
+
 // =============================================================================
-// Minimal infrastructure (lightweight subset of server.ts)
+// HTTP helper — raw POST using Node.js built-in http module
 // =============================================================================
 
-import { randomUUID } from "crypto";
+function httpPost(url: string, body: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options: http.RequestOptions = {
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+    const req = http.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    });
+    req.on("error", (err) => reject(err));
+    req.write(body);
+    req.end();
+  });
+}
+
+// =============================================================================
+// MCP Server factories — each server is an independent http.Server
+// =============================================================================
 
 interface Ticket {
   id: string;
@@ -30,124 +60,160 @@ interface Ticket {
   created_at: string;
 }
 
-const tickets: Map<string, Ticket> = new Map();
-let ticketCounter = 0;
+function createTicketServer(prefix: string): {
+  server: http.Server;
+  getUrl: () => string;
+} {
+  const tickets = new Map<string, Ticket>();
+  let counter = 0;
 
-function resetStore(): void {
-  tickets.clear();
-  ticketCounter = 0;
-}
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      const rawBody = Buffer.concat(chunks).toString("utf-8");
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(rawBody);
+      } catch {
+        const errResp = {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: "Parse error" },
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(errResp));
+        return;
+      }
 
-// --- Structured error helper ------------------------------------------------
+      const requestId = msg.id;
+      const method = msg.method as string;
+      const params = (msg.params ?? {}) as Record<string, unknown>;
 
-function structuredError(
-  code: string,
-  message: string,
-  category: string
-): Record<string, unknown> {
-  return { error: { code, message, category } };
-}
+      if (method === "tools/call") {
+        const toolName = params.name as string;
+        const args = (params.arguments ?? {}) as Record<string, unknown>;
 
-// --- Tool handlers ----------------------------------------------------------
+        let result: Record<string, unknown>;
 
-function handleCreateTicket(params: Record<string, unknown>): Record<string, unknown> {
-  ticketCounter++;
-  const ticketId = `PROJ-${ticketCounter}`;
-  const ticket: Ticket = {
-    id: ticketId,
-    title: params.title as string,
-    status: "open",
-    created_at: new Date().toISOString(),
+        if (toolName === "create_ticket") {
+          counter++;
+          const ticketId = `${prefix}-${counter}`;
+          const ticket: Ticket = {
+            id: ticketId,
+            title: args.title as string,
+            status: "open",
+            created_at: new Date().toISOString(),
+          };
+          tickets.set(ticketId, ticket);
+          result = {
+            ticket: { id: ticketId, title: ticket.title },
+            created: true,
+          };
+        } else if (toolName === "delete_ticket") {
+          const ticketId = args.ticket_id as string;
+          if (!tickets.has(ticketId)) {
+            result = {
+              error: {
+                code: "RESOURCE_NOT_FOUND",
+                message: `Ticket ${ticketId} does not exist.`,
+                category: "permanent",
+              },
+            };
+          } else {
+            tickets.delete(ticketId);
+            result = { deleted: true, ticket_id: ticketId };
+          }
+        } else {
+          const errResp = {
+            jsonrpc: "2.0",
+            id: requestId,
+            error: { code: -32601, message: `Method not found: ${toolName}` },
+          };
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(errResp));
+          return;
+        }
+
+        const resp = { jsonrpc: "2.0", id: requestId, result };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(resp));
+        return;
+      }
+
+      // Not tools/call
+      const errResp = {
+        jsonrpc: "2.0",
+        id: requestId,
+        error: { code: -32601, message: `Method not found: ${method}` },
+      };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(errResp));
+    });
+  });
+
+  return {
+    server,
+    getUrl: () => {
+      const addr = server.address() as { port: number };
+      return `http://127.0.0.1:${addr.port}`;
+    },
   };
-  tickets.set(ticketId, ticket);
-  return { ticket: { id: ticketId, title: ticket.title }, created: true };
 }
 
-function handleDeleteTicket(params: Record<string, unknown>): Record<string, unknown> {
-  const ticketId = params.ticket_id as string;
-  if (!tickets.has(ticketId)) {
-    return structuredError(
-      "RESOURCE_NOT_FOUND",
-      `Ticket ${ticketId} does not exist.`,
-      "permanent"
-    );
-  }
-  tickets.delete(ticketId);
-  return { deleted: true, ticket_id: ticketId };
-}
+function createSlackServer(): {
+  server: http.Server;
+  getUrl: () => string;
+} {
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      const rawBody = Buffer.concat(chunks).toString("utf-8");
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(rawBody);
+      } catch {
+        const errResp = {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: "Parse error" },
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(errResp));
+        return;
+      }
 
-// --- Request router ---------------------------------------------------------
+      // Always return Method not found for any tools/call
+      const errResp = {
+        jsonrpc: "2.0",
+        id: msg.id,
+        error: { code: -32601, message: "Method not found" },
+      };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(errResp));
+    });
+  });
 
-async function handleRequest(request: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const tool = request.tool as string;
-  const params = (request.parameters ?? {}) as Record<string, unknown>;
-
-  switch (tool) {
-    case "create_ticket":
-      return handleCreateTicket(params);
-    case "delete_ticket":
-      return handleDeleteTicket(params);
-    default:
-      return structuredError("RESOURCE_NOT_FOUND", `Unknown tool: ${tool}`, "permanent");
-  }
-}
-
-// --- JSON-RPC 2.0 layer (from server.ts) ------------------------------------
-
-function buildJsonRpcRequest(
-  method: string,
-  params?: Record<string, unknown>,
-  requestId?: string
-): string {
-  const msg: Record<string, unknown> = {
-    jsonrpc: "2.0",
-    method,
-    params: params ?? {},
-    id: requestId ?? randomUUID(),
+  return {
+    server,
+    getUrl: () => {
+      const addr = server.address() as { port: number };
+      return `http://127.0.0.1:${addr.port}`;
+    },
   };
-  return JSON.stringify(msg);
 }
 
-function buildJsonRpcResponse(requestId: unknown, result: unknown): Record<string, unknown> {
-  return { jsonrpc: "2.0", id: requestId, result };
+function listenOnRandomPort(server: http.Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
 }
 
-function buildJsonRpcError(
-  requestId: unknown,
-  code: number,
-  message: string
-): Record<string, unknown> {
-  return { jsonrpc: "2.0", id: requestId, error: { code, message } };
-}
-
-async function processJsonRpc(rawJson: string): Promise<string> {
-  let msg: Record<string, unknown>;
-  try {
-    msg = JSON.parse(rawJson);
-  } catch {
-    return JSON.stringify(buildJsonRpcError(null, -32700, "Parse error"));
-  }
-
-  const requestId = msg.id;
-  const method = msg.method as string;
-  const params = (msg.params ?? {}) as Record<string, unknown>;
-
-  if (method === "tools/call") {
-    const toolName = params.name as string;
-    const args = (params.arguments ?? {}) as Record<string, unknown>;
-    try {
-      const result = await handleRequest({ tool: toolName, parameters: args });
-      return JSON.stringify(buildJsonRpcResponse(requestId, result));
-    } catch (e: unknown) {
-      return JSON.stringify(
-        buildJsonRpcError(requestId, -32603, String(e))
-      );
-    }
-  }
-
-  return JSON.stringify(
-    buildJsonRpcError(requestId, -32601, `Method not found: ${method}`)
-  );
+function closeServer(server: http.Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+  });
 }
 
 // =============================================================================
@@ -155,11 +221,12 @@ async function processJsonRpc(rawJson: string): Promise<string> {
 // =============================================================================
 
 interface CompensationEntry {
-  server_id: string;
-  step_id: string;
-  compensation_tool: string;
-  compensation_arguments: Record<string, unknown>;
-  idempotency_key: string;
+  serverUrl: string;
+  serverLabel: string;
+  stepId: string;
+  compensationTool: string;
+  compensationArguments: Record<string, unknown>;
+  idempotencyKey: string;
   status: "pending" | "compensated" | "compensation_failed";
 }
 
@@ -168,7 +235,8 @@ class SagaOrchestrator {
   private stepNumber = 0;
 
   async executeStep(
-    serverId: string,
+    serverUrl: string,
+    serverLabel: string,
     toolName: string,
     args: Record<string, unknown>,
     compensationTool: string,
@@ -177,18 +245,27 @@ class SagaOrchestrator {
     this.stepNumber++;
     const stepNum = this.stepNumber;
 
-    const request = buildJsonRpcRequest("tools/call", {
-      name: toolName,
-      arguments: args,
-    });
+    const rpcRequest = {
+      jsonrpc: "2.0",
+      method: "tools/call",
+      params: { name: toolName, arguments: args },
+      id: crypto.randomUUID(),
+    };
 
-    // All "servers" route through the same processJsonRpc — see module header.
-    const rawResponse = await processJsonRpc(request);
+    let rawResponse: string;
+    try {
+      rawResponse = await httpPost(serverUrl, JSON.stringify(rpcRequest));
+    } catch {
+      console.log(`  Step ${stepNum} [${serverLabel}]: ${toolName} -> FAILED`);
+      await this.rollback();
+      return { success: false, step: stepNum };
+    }
+
     const response = JSON.parse(rawResponse) as Record<string, unknown>;
 
     // JSON-RPC level error
     if (response.error) {
-      console.log(`  Step ${stepNum} [${serverId}]: ${toolName} -> FAILED`);
+      console.log(`  Step ${stepNum} [${serverLabel}]: ${toolName} -> FAILED`);
       await this.rollback();
       return { success: false, step: stepNum };
     }
@@ -197,7 +274,7 @@ class SagaOrchestrator {
 
     // Application-level structured error
     if (result.error) {
-      console.log(`  Step ${stepNum} [${serverId}]: ${toolName} -> FAILED`);
+      console.log(`  Step ${stepNum} [${serverLabel}]: ${toolName} -> FAILED`);
       await this.rollback();
       return { success: false, step: stepNum };
     }
@@ -208,15 +285,16 @@ class SagaOrchestrator {
     const stepId = `create-${ticketId}`;
 
     this.compensationLog.push({
-      server_id: serverId,
-      step_id: stepId,
-      compensation_tool: compensationTool,
-      compensation_arguments: compArgs,
-      idempotency_key: `compensate-${randomUUID()}`,
+      serverUrl,
+      serverLabel,
+      stepId,
+      compensationTool: compensationTool,
+      compensationArguments: compArgs,
+      idempotencyKey: `compensate-${crypto.randomUUID()}`,
       status: "pending",
     });
 
-    console.log(`  Step ${stepNum} [${serverId}]: ${toolName} -> success (${ticketId})`);
+    console.log(`  Step ${stepNum} [${serverLabel}]: ${toolName} -> success (${ticketId})`);
     return { success: true, step: stepNum, result };
   }
 
@@ -225,25 +303,42 @@ class SagaOrchestrator {
 
     for (let i = this.compensationLog.length - 1; i >= 0; i--) {
       const entry = this.compensationLog[i];
-      const request = buildJsonRpcRequest("tools/call", {
-        name: entry.compensation_tool,
-        arguments: entry.compensation_arguments,
-        _meta: { idempotency_key: entry.idempotency_key },
-      });
 
-      const raw = await processJsonRpc(request);
-      const resp = JSON.parse(raw) as Record<string, unknown>;
+      const rpcRequest = {
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          name: entry.compensationTool,
+          arguments: entry.compensationArguments,
+          _meta: { idempotency_key: entry.idempotencyKey },
+        },
+        id: crypto.randomUUID(),
+      };
+
+      let rawResponse: string;
+      try {
+        rawResponse = await httpPost(entry.serverUrl, JSON.stringify(rpcRequest));
+      } catch (err: unknown) {
+        // Connection error (e.g. ECONNREFUSED when server is shut down)
+        entry.status = "compensation_failed";
+        console.log(
+          `  Compensate Step ${i + 1}: ${entry.compensationTool} -> FAILED (compensation_failed)`
+        );
+        continue;
+      }
+
+      const resp = JSON.parse(rawResponse) as Record<string, unknown>;
       const result = (resp.result ?? {}) as Record<string, unknown>;
 
       if (resp.error || result.error) {
         entry.status = "compensation_failed";
         console.log(
-          `  Compensate Step ${i + 1}: ${entry.compensation_tool} -> FAILED (compensation_failed)`
+          `  Compensate Step ${i + 1}: ${entry.compensationTool} -> FAILED (compensation_failed)`
         );
       } else {
         entry.status = "compensated";
         console.log(
-          `  Compensate Step ${i + 1}: ${entry.compensation_tool} -> success`
+          `  Compensate Step ${i + 1}: ${entry.compensationTool} -> success`
         );
       }
     }
@@ -266,7 +361,7 @@ class SagaOrchestrator {
     console.log();
     console.log("  Compensation Log:");
     this.compensationLog.forEach((entry, i) => {
-      console.log(`    [${i + 1}] ${entry.server_id}/${entry.step_id}: ${entry.status}`);
+      console.log(`    [${i + 1}] ${entry.serverLabel}/${entry.stepId}: ${entry.status}`);
     });
   }
 }
@@ -275,12 +370,16 @@ class SagaOrchestrator {
 // Demo Scenarios
 // =============================================================================
 
-async function scenarioA(): Promise<void> {
-  resetStore();
+async function scenarioA(
+  jiraUrl: string,
+  confluenceUrl: string,
+  slackUrl: string
+): Promise<void> {
   const saga = new SagaOrchestrator();
 
   // Step 1: jira-server -> create_ticket
   await saga.executeStep(
+    jiraUrl,
     "jira-server",
     "create_ticket",
     { title: "Deploy v2.1" },
@@ -290,6 +389,7 @@ async function scenarioA(): Promise<void> {
 
   // Step 2: confluence-server -> create_ticket
   await saga.executeStep(
+    confluenceUrl,
     "confluence-server",
     "create_ticket",
     { title: "Link docs" },
@@ -297,8 +397,9 @@ async function scenarioA(): Promise<void> {
     (r) => ({ ticket_id: (r.ticket as Record<string, unknown>).id })
   );
 
-  // Step 3: slack-server -> post_message (will fail: unknown tool)
+  // Step 3: slack-server -> post_message (will fail: Method not found)
   await saga.executeStep(
+    slackUrl,
     "slack-server",
     "post_message",
     { channel: "#releases", text: "Deployed v2.1" },
@@ -309,21 +410,27 @@ async function scenarioA(): Promise<void> {
   saga.printCompensationLog();
 }
 
-async function scenarioB(): Promise<void> {
-  resetStore();
+async function scenarioB(
+  jiraUrl: string,
+  confluenceUrl: string,
+  slackUrl: string,
+  jiraServer: http.Server
+): Promise<void> {
   const saga = new SagaOrchestrator();
 
-  // Step 1: create_ticket — compensation deliberately uses nonexistent ticket ID
+  // Step 1: jira-server -> create_ticket
   await saga.executeStep(
+    jiraUrl,
     "jira-server",
     "create_ticket",
     { title: "Deploy v2.1" },
     "delete_ticket",
-    () => ({ ticket_id: "PROJ-9999" }) // injected failure for compensation
+    (r) => ({ ticket_id: (r.ticket as Record<string, unknown>).id })
   );
 
-  // Step 2: create_ticket
+  // Step 2: confluence-server -> create_ticket
   await saga.executeStep(
+    confluenceUrl,
     "confluence-server",
     "create_ticket",
     { title: "Link docs" },
@@ -331,8 +438,13 @@ async function scenarioB(): Promise<void> {
     (r) => ({ ticket_id: (r.ticket as Record<string, unknown>).id })
   );
 
-  // Step 3: fail (unknown tool)
+  // Step 3: slack-server -> post_message (will fail: Method not found)
+  // Before rollback begins, shut down the Jira server so its compensation
+  // will get ECONNREFUSED.
+  await closeServer(jiraServer);
+
   await saga.executeStep(
+    slackUrl,
     "slack-server",
     "post_message",
     { channel: "#releases", text: "Deployed v2.1" },
@@ -343,16 +455,60 @@ async function scenarioB(): Promise<void> {
   saga.printCompensationLog();
 }
 
+// =============================================================================
+// Main
+// =============================================================================
+
 async function main(): Promise<void> {
+  // Create three independent HTTP servers
+  const jira = createTicketServer("JIRA");
+  const confluence = createTicketServer("CONF");
+  const slack = createSlackServer();
+
+  await Promise.all([
+    listenOnRandomPort(jira.server),
+    listenOnRandomPort(confluence.server),
+    listenOnRandomPort(slack.server),
+  ]);
+
+  const jiraUrl = jira.getUrl();
+  const confluenceUrl = confluence.getUrl();
+  const slackUrl = slack.getUrl();
+
   console.log("=== Cross-Server Saga Demo ===");
   console.log();
+  console.log(`  Jira server:       ${jiraUrl}`);
+  console.log(`  Confluence server:  ${confluenceUrl}`);
+  console.log(`  Slack server:       ${slackUrl}`);
+  console.log();
+
   console.log("--- Scenario A: Clean Rollback ---");
-  await scenarioA();
+  await scenarioA(jiraUrl, confluenceUrl, slackUrl);
   console.log();
+
+  // For Scenario B we need a fresh Jira server (Scenario A's is still running
+  // but its ticket store was mutated).  Re-create so the demo is self-contained.
+  const jiraB = createTicketServer("JIRA");
+  await listenOnRandomPort(jiraB.server);
+  const jiraBUrl = jiraB.getUrl();
+
   console.log("--- Scenario B: Partial Rollback ---");
-  await scenarioB();
+  await scenarioB(jiraBUrl, confluenceUrl, slackUrl, jiraB.server);
   console.log();
+
   console.log("=== Demo complete ===");
+
+  // Shut down remaining servers
+  await Promise.all([
+    closeServer(jira.server),
+    closeServer(confluence.server),
+    closeServer(slack.server),
+  ]).catch(() => {});
+
+  process.exit(0);
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
