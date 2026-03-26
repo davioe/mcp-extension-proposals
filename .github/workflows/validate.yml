@@ -33,3 +33,27 @@ jobs:
       - name: Run TypeScript reference implementation
         run: npx tsx examples/typescript/server.ts
         timeout-minutes: 2
+
+      - name: Run Saga demo (Python)
+        run: python examples/python/saga_demo.py
+        timeout-minutes: 2
+
+      - name: Run Saga demo (TypeScript)
+        run: npx tsx examples/typescript/saga-demo.ts
+        timeout-minutes: 2
+
+      - name: Run SSE subscription demo (TypeScript)
+        run: npx tsx examples/typescript/sse-subscription-demo.ts
+        timeout-minutes: 2
+
+      - name: Run SSE subscription demo (Python)
+        run: python examples/python/sse_subscription_demo.py
+        timeout-minutes: 2
+
+      - name: Run data reference demo (TypeScript)
+        run: npx tsx examples/typescript/data-reference-demo.ts
+        timeout-minutes: 2
+
+      - name: Run data reference demo (Python)
+        run: python examples/python/data_reference_demo.py
+        timeout-minutes: 2

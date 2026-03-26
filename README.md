@@ -73,25 +73,27 @@ In practice, real-world agent workflows are multi-step, data-intensive, and fail
 
 The following table maps each proposal against the current specification and existing SEPs. This ensures we address **genuine remaining gaps**, not problems already solved.
 
-| # | Proposal | Spec Coverage | Relevant SEP | Gap Status | What Remains |
-|---|----------|--------------|--------------|------------|-------------|
-| 1 | Capability Discovery & Manifest | `initialize` negotiation + tool `annotations` | SEP-2133 (Extensions) | **Partially addressed** | No operational metadata (rate limits, quotas, cost, latency per tool). No runtime re-introspection beyond `listChanged`. |
-| 2 | Intent Hints | None | — | **Not addressed** | No mechanism for clients to communicate *why* they are calling a tool. |
-| 3 | Cost & Latency Transparency | None | — | **Not addressed** | No cost, latency, or quota metadata on tool definitions. |
-| 4 | Granular Permissions & Scoped Auth | OAuth 2.1 at transport level | — | **Partially addressed** | No per-tool scopes, no `can_execute` pre-flight check, no session TTL semantics. Permission boundaries discovered only through failures. |
-| 5 | Idempotency & Transactions | `idempotentHint` annotation (advisory only) | — | **Not addressed** | Hint tells clients a tool *is* idempotent — but provides no wire-level idempotency key mechanism or transaction/rollback protocol. |
-| 6 | Human-in-the-Loop | `destructiveHint` annotation (advisory) + Elicitation | — | **Partially addressed** | Annotations are advisory — no mandatory confirmation protocol. Elicitation enables user input but is server-initiated for data gathering, not a tool-level "confirm before execute" gate. |
-| 7 | Provenance | None | — | **Not addressed** | No source attribution mechanism on tool responses. |
-| 8 | Streaming & Progress | `notifications/progress` + SSE transport | SEP-1686 (Tasks, experimental) | **Partially addressed** | Progress is numeric-only. No partial result streaming. No checkpoint/resume tokens. Tasks are experimental with incomplete SDK support. |
-| 9 | Data References | None | — | **Not addressed** | All data flows through the client. No server-to-server reference/transfer mechanism. |
-| 10 | Multimodal Signatures | Base64 content types (image, audio) | — | **Partially addressed** | No tool-level MIME type declarations, no `max_input_size_bytes`, no efficient binary transport (multipart). All binary is base64-in-JSON. |
-| 11 | Structured Error Model | JSON-RPC error codes only | — | **Not addressed** | No `category`, `retry_after_seconds`, `user_actionable`, or `suggestion` fields. No structured retry semantics. |
-| 12 | Conformance Test Suite | None | Part of governance roadmap | **Not addressed** | No standardized test kit for validating servers against the spec. |
-| 13 | Server Discovery | None | — | **Not addressed** | No registry, recommendation, or capability-based server search. |
-| 14 | Session State | Transport-level `Mcp-Session-Id` | — | **Partially addressed** | Session ID exists but no cross-call opaque state tokens (cookie-style). No TTL, no session resumption after disconnection. |
-| 15 | Bidirectional Push | Resource-URI subscriptions only | — | **Partially addressed** | Subscriptions limited to resource URIs. No general-purpose event subscription (e.g., "commit to main", "ticket resolved"). No event filtering or taxonomy. |
+| # | Proposal | Spec Coverage | Relevant SEP | Gap Status | What Remains | Details |
+|---|----------|--------------|--------------|------------|-------------|---------|
+| 1 | Capability Discovery & Manifest | `initialize` negotiation + tool `annotations` | SEP-2133 (Extensions), SEP-1865 (MCP Apps) | **Partially addressed** (major) | No operational metadata (rate limits, quotas, cost, latency per tool). No runtime re-introspection beyond `listChanged`. Extensions framework is GA but covers negotiation, not operational discovery. | [Audit](docs/spec-alignment/01-capability-discovery.md) |
+| 2 | Intent Hints | None | — | **Gap** | No mechanism for clients to communicate *why* they are calling a tool. | [Audit](docs/spec-alignment/02-intent-hints.md) |
+| 3 | Cost & Latency Transparency | None | — | **Gap** | No cost, latency, or quota metadata on tool definitions. | [Audit](docs/spec-alignment/03-cost-latency-transparency.md) |
+| 4 | Granular Permissions & Scoped Auth | OAuth 2.1 at transport level | — | **Partially addressed** (major) | No per-tool scopes, no `can_execute` pre-flight check, no session TTL semantics. Permission boundaries discovered only through failures. | [Audit](docs/spec-alignment/04-scoped-auth.md) |
+| 5 | Idempotency & Transactions | `idempotentHint` annotation (advisory only) | — | **Gap** | Hint tells clients a tool *is* idempotent — but provides no wire-level idempotency key mechanism or transaction/rollback protocol. | [Audit](docs/spec-alignment/05-idempotency-transactions.md) |
+| 6 | Human-in-the-Loop | `destructiveHint` annotation (advisory) + Elicitation | — | **Partially addressed** (major) | Annotations are advisory — no mandatory confirmation protocol. Elicitation enables user input but is server-initiated for data gathering, not a tool-level "confirm before execute" gate. | [Audit](docs/spec-alignment/06-human-in-the-loop.md) |
+| 7 | Provenance | None | — | **Gap** | No source attribution mechanism on tool responses. | [Audit](docs/spec-alignment/07-provenance.md) |
+| 8 | Streaming & Progress | `notifications/progress` + SSE transport | SEP-1686 (Tasks, experimental) | **Partially addressed** (major) | Progress is numeric-only. No partial result streaming. No checkpoint/resume tokens. Tasks are experimental with incomplete SDK support. | [Audit](docs/spec-alignment/08-streaming-progress.md) |
+| 9 | Data References | None | — | **Gap** | All data flows through the client. No server-to-server reference/transfer mechanism. | [Audit](docs/spec-alignment/09-data-references.md) |
+| 10 | Multimodal Signatures | Base64 content types (image, audio) | — | **Partially addressed** (minor) | No tool-level MIME type declarations, no `max_input_size_bytes`, no efficient binary transport (multipart). All binary is base64-in-JSON. | [Audit](docs/spec-alignment/10-multimodal-signatures.md) |
+| 11 | Structured Error Model | JSON-RPC error codes only | — | **Gap** | No `category`, `retry_after_seconds`, `user_actionable`, or `suggestion` fields. No structured retry semantics. | [Audit](docs/spec-alignment/11-structured-error-model.md) |
+| 12 | Conformance Test Suite | None | Part of governance roadmap | **Gap** | No standardized test kit for validating servers against the spec. | [Audit](docs/spec-alignment/12-conformance-test-suite.md) |
+| 13 | Server Discovery | None | — | **Partially addressed** (minor) | No registry, recommendation, or capability-based server search. | [Audit](docs/spec-alignment/13-server-discovery.md) |
+| 14 | Session State | Transport-level `Mcp-Session-Id` | — | **Partially addressed** (major) | Session ID exists but no cross-call opaque state tokens (cookie-style). No TTL, no session resumption after disconnection. | [Audit](docs/spec-alignment/14-session-state.md) |
+| 15 | Bidirectional Push | Resource-URI subscriptions only | — | **Partially addressed** (major) | Subscriptions limited to resource URIs. No general-purpose event subscription (e.g., "commit to main", "ticket resolved"). No event filtering or taxonomy. | [Audit](docs/spec-alignment/15-bidirectional-push.md) |
 
-**Summary:** 0 proposals fully addressed, 7 partially addressed, 8 not addressed. All 15 proposals identify genuine remaining gaps even accounting for the 2025-11-25 spec and existing finalized SEPs (see [SEP index](https://modelcontextprotocol.io/community/seps) for the current count).
+> **Note:** The Extensions framework (SEP-2133) is now GA in the 2025-11-25 spec, providing standardized capability negotiation for protocol extensions. MCP Apps (SEP-1865) introduces rich client-side UI rendering. Neither subsumes the proposals above — Extensions provides the *mechanism* for registering new capabilities but not the capabilities themselves, and MCP Apps addresses UI rendering rather than protocol-level safety or reliability gaps.
+
+**Summary:** 0 proposals fully superseded, 7 partially addressed (5 major, 2 minor gaps), 8 not addressed. All 15 proposals identify genuine remaining gaps. See `docs/spec-alignment/` for detailed per-proposal audit.
 
 ---
 

@@ -47,6 +47,10 @@ All 15 proposals now have schemas and reference implementations. Areas where con
 
 ## Validation
 
+### Spec Alignment Audit
+
+Each of the 15 proposals has a detailed audit file in `docs/spec-alignment/` tracing it against the MCP 2025-11-25 specification. When modifying a proposal, update the corresponding audit file.
+
 To validate all manifests and schemas locally:
 
 ```bash

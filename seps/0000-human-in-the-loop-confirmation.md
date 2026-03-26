@@ -26,6 +26,17 @@ For enterprise adoption, this gap is a blocker. Organizations will not deploy ag
 
 The spec's elicitation mechanism (form mode and URL mode) enables servers to request user input — but it is designed for data gathering, not for confirmation gates. Elicitation is server-initiated (the server decides when to ask) and returns structured data. The HITL confirmation protocol is tool-definition-level (declared upfront) and returns a simple approve/deny signal. The two mechanisms serve different purposes and can coexist.
 
+## Relationship to MCP 2025-11-25
+
+The 2025-11-25 spec introduces several mechanisms adjacent to human-in-the-loop confirmation. None replaces this proposal:
+
+- **`destructiveHint` annotation.** Advisory only — clients MAY prompt for confirmation but are not required to. Our `requires_confirmation` flag is mandatory: clients MUST obtain approval before execution. The two coexist: `destructiveHint` for backward-compatible hinting, `requires_confirmation` for enforced gates.
+- **Elicitation (form mode + URL mode).** Server-initiated data gathering — the server asks the user for structured input mid-call. This is fundamentally different from a tool-definition-level "confirm before execute" gate that is declared upfront and returns a simple approve/deny signal.
+- **Tasks `input_required` state.** A runtime signal that a long-running task needs user input to proceed. This is reactive (arises during execution) whereas our proposal is declarative (declared in the tool definition before any call is made).
+- **MCP Apps (SEP-1865).** Rich client-side UI rendering. MCP Apps could render sophisticated confirmation dialogs, but the protocol still needs a standardized signal that confirmation is *required* — which is what this SEP provides.
+
+These mechanisms are complementary, not competing. Each addresses a different point in the interaction lifecycle.
+
 ## Specification
 
 ### Tool Definition

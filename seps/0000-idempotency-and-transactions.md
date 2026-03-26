@@ -26,6 +26,16 @@ MCP's current request-response model has no built-in mechanism to handle two fun
 
 2. **Orphaned artifacts.** An agent creates a Jira ticket (step 1), links a Confluence page (step 2), then fails to post a Slack notification (step 3). The Jira ticket and Confluence link remain but the workflow is incomplete. With compensation-based transactions, the failed step triggers rollback: the Confluence link is removed and the Jira ticket is deleted.
 
+## Relationship to MCP 2025-11-25
+
+The 2025-11-25 spec acknowledges idempotency but provides no wire-level mechanism:
+
+- **`idempotentHint` annotation.** Advisory only — tells clients that a tool is safe to retry without side effects. However, it provides no idempotency key, no replay detection, and no stored-result mechanism. A client retrying a `create_issue` call has no way to distinguish "the first call succeeded and this is a duplicate" from "the first call failed." Our proposal adds the missing wire-level protocol: a client-generated key, server-side replay detection, and `was_replay` metadata in responses.
+- **No transaction primitives.** The spec has no concept of multi-step atomic operations, no compensation protocol, and no rollback mechanism. If step 3 of a 5-step workflow fails, steps 1 and 2 remain in an inconsistent state with no protocol-level recovery path.
+- **No compensation or rollback.** Saga-style compensation, `transaction/begin`, `transaction/commit`, and `transaction/rollback` are entirely absent from the spec. Our proposal provides the coordination protocol that makes multi-step agent workflows recoverable.
+
+The `idempotentHint` annotation and this SEP are complementary: the hint declares intent, the key enforces it.
+
 ## Specification
 
 ### Idempotency Keys
@@ -179,3 +189,63 @@ Both mechanisms are fully opt-in:
 - **Idempotency key storage.** Servers MUST bound the storage used for idempotency keys (TTL expiry, maximum entries). An attacker could otherwise exhaust server memory by sending unique keys.
 - **Transaction timeout.** The `timeout_seconds` field prevents resource exhaustion from abandoned transactions. Servers MUST enforce the timeout.
 - **Compensation action validation.** Servers MUST validate that compensation actions are legitimate rollback operations, not arbitrary tool calls injected by a malicious client.
+
+## Cross-Server Coordination
+
+### Overview
+
+The single-server transaction model above handles the common case. For multi-step workflows spanning multiple independent MCP servers, a client-side Saga orchestrator provides best-effort compensation-based rollback.
+
+### Coordination Model
+
+The client maintains an in-memory compensation log — an ordered list of completed steps with their compensation actions. Each server manages its own state independently; the client coordinates the global workflow. No server-to-server communication is required.
+
+**Compensation Log Entry:**
+```json
+{
+  "server_id": "jira-server",
+  "step_id": "create-PROJ-42",
+  "compensation_tool": "delete_issue",
+  "compensation_arguments": { "issue_id": "PROJ-42" },
+  "idempotency_key": "compensate-create-PROJ-42",
+  "status": "pending"
+}
+```
+
+### Worked Example
+
+A client orchestrates a workflow across three servers:
+
+1. **Client → Jira Server:** `create_issue({title: "Deploy v2.1"})` → success, returns `PROJ-42`
+   - Compensation registered: `delete_issue({issue_id: "PROJ-42"})`
+2. **Client → Confluence Server:** `link_page({page_id: "DOC-100", issue_id: "PROJ-42"})` → success
+   - Compensation registered: `unlink_page({page_id: "DOC-100", issue_id: "PROJ-42"})`
+3. **Client → Slack Server:** `post_message({channel: "#releases", text: "PROJ-42 deployed"})` → **FAIL** (channel archived)
+
+Rollback (reverse order):
+1. Client → Confluence: `unlink_page(...)` with idempotency key → success
+2. Client → Jira: `delete_issue(...)` with idempotency key → success
+3. Report: all compensations succeeded, clean rollback
+
+### Failure Matrix
+
+| Scenario | Outcome | Client Action |
+|----------|---------|---------------|
+| All compensations succeed | Clean rollback | Report success |
+| One compensation fails (e.g., Confluence unavailable) | Partial rollback | Report which steps could not be compensated; log for manual intervention |
+| Client crashes during rollback | Compensation state lost (ephemeral log) | System remains in partially compensated state — acknowledged limitation |
+| Server crashes during forward step | Client detects timeout | Initiate rollback for completed steps |
+| Compromised compensation endpoint | Server returns success without compensating | Recommend out-of-band verification when possible |
+
+### Security: Confirmation Scope
+
+- Each server independently validates `user_confirmed` for its own destructive tools
+- Confirmation tokens are server-scoped and parameter-bound — a confirmation for `delete_issue(PROJ-42)` on Jira does not authorize `drop_database()` on another server
+- All compensation actions carry idempotency keys to handle retry-after-timeout safely
+
+### Limitations
+
+- Cross-server Sagas are **best-effort**. The protocol cannot prevent a scenario where Server A's compensation succeeds but Server B's fails, leaving the system inconsistent.
+- The compensation log is ephemeral by default. Clients requiring durability must persist the log to their own backing store — this is outside the MCP protocol scope.
+- Steps execute strictly sequentially (one server at a time). Concurrent cross-server steps are out of scope for v1 to simplify compensation ordering.
+- 2PC (two-phase commit) is infeasible because external SaaS APIs do not implement prepare/commit phases. The Saga pattern is the pragmatic alternative for MCP's architecture (client-orchestrated, server-executed).

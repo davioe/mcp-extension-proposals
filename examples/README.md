@@ -47,25 +47,31 @@ All schemas are [JSON Schema 2020-12](https://json-schema.org/draft/2020-12/rele
 
 ### Coverage Matrix
 
-| Proposal | Schema | Python | TypeScript | Example Manifest |
-|----------|--------|--------|------------|-----------------|
-| 1. Capability Discovery | ✅ | ✅ | ✅ | ✅ |
-| 2. Intent Hints | ✅ (in manifest) | ✅ | ✅ | — |
-| 3. Cost Transparency | ✅ (in manifest) | ✅ | ✅ | ✅ |
-| 4. Scoped Auth | ✅ | ✅ | ✅ | ✅ |
-| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | ✅ |
-| 6. Human-in-the-Loop | ✅ (in manifest) | ✅ | ✅ | ✅ |
-| 7. Provenance | ✅ | ✅ | ✅ | ✅ |
-| 8. Streaming & Progress | ✅ | ✅ | ✅ | ✅ |
-| 9. Data References | ✅ | ✅ | ✅ | ✅ |
-| 10. Multimodal Signatures | ✅ (in manifest) | ✅ | ✅ | ✅ |
-| 11. Structured Errors | ✅ | ✅ | ✅ | ✅ |
-| 12. Conformance Suite | ✅ | ✅ | ✅ | — |
-| 13. Server Discovery | ✅ (in manifest) | ✅ | ✅ | ✅ |
-| 14. Session State | ✅ | ✅ | ✅ | — |
-| 15. Bidirectional Push | ✅ | ✅ | ✅ | — |
+| Proposal | Schema | Python | TypeScript | Example Manifest | Transport Demo |
+|----------|--------|--------|------------|-----------------|----------------|
+| 1. Capability Discovery | ✅ | ✅ | ✅ | ✅ | — |
+| 2. Intent Hints | ✅ (in manifest) | ✅ | ✅ | — | — |
+| 3. Cost Transparency | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
+| 4. Scoped Auth | ✅ | ✅ | ✅ | ✅ | — |
+| 5. Idempotency & Transactions | ✅ | ✅ | ✅ | ✅ | saga_demo.py / saga-demo.ts (in-process Saga simulation) |
+| 6. Human-in-the-Loop | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
+| 7. Provenance | ✅ | ✅ | ✅ | ✅ | — |
+| 8. Streaming & Progress | ✅ | ✅ | ✅ | ✅ | — |
+| 9. Data References | ✅ | ✅ | ✅ | ✅ | data_reference_demo.py / data-reference-demo.ts (HTTP transport with signed URLs) |
+| 10. Multimodal Signatures | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
+| 11. Structured Errors | ✅ | ✅ | ✅ | ✅ | — |
+| 12. Conformance Suite | ✅ | ✅ | ✅ | — | — |
+| 13. Server Discovery | ✅ (in manifest) | ✅ | ✅ | ✅ | — |
+| 14. Session State | ✅ | ✅ | ✅ | — | — |
+| 15. Bidirectional Push | ✅ | ✅ | ✅ | — | sse_subscription_demo.py / sse-subscription-demo.ts (SSE transport) |
 
 **Full coverage achieved:** All 15 proposals have schemas and reference implementations in both Python and TypeScript.
+
+### In-Process Demos vs. Transport-Level Demos
+
+The **in-process demos** (`server.py` / `server.ts`) exercise all 15 proposals within a single process — the client and server logic run together with no real network I/O. They are ideal for quickly verifying protocol logic and schema compliance.
+
+The **transport-level demos** (separate files such as `saga-demo.ts`, `sse-subscription-demo.py`, etc.) spin up real HTTP servers and clients, exercising the proposals over actual network transports (HTTP requests, SSE streams, signed URLs). They validate that the proposals work correctly when serialised across a wire and are closer to production conditions.
 
 ## Reference Implementations
 

@@ -30,6 +30,16 @@ This forces every client to implement ad-hoc error parsing for each server, or f
 
 3. **Scope escalation without guidance.** A tool call fails because the user lacks write permissions. With `suggestion: "Request the write:issues scope to perform this action"`, the client can proactively guide scope elevation.
 
+## Relationship to MCP 2025-11-25
+
+The 2025-11-25 spec provides error handling at the transport level but no application-level error semantics:
+
+- **JSON-RPC error codes** (`-32600` through `-32700`, plus MCP-specific `-32001`, `-32002`) communicate protocol violations and transport failures. They carry no retry semantics, no user-actionability signal, and no remediation guidance.
+- **Tool Execution Errors (SEP-1303).** The `isError` flag on `CallToolResult` content distinguishes tool-level failures from protocol errors. However, it adds no structured fields — the error is still a free-text `message` with no machine-readable category, retry timing, or suggestion.
+- **No structured error fields exist in the spec.** The fields this SEP introduces — `category`, `retry_after_seconds`, `user_actionable`, `suggestion`, `documentation_url` — have no equivalent in the current specification. Clients today cannot programmatically distinguish a transient rate limit from a permanent permission denial.
+
+This proposal fills the gap between transport-level JSON-RPC errors and unstructured tool error messages, enabling intelligent retry logic and meaningful user-facing error reporting.
+
 ## Specification
 
 ### Error Response Schema
