@@ -348,6 +348,150 @@ function withProvenance<T>(result: T, source: string, confidence: Provenance["co
 }
 
 // =============================================================================
+// JSON-RPC 2.0 Wire Format
+// =============================================================================
+
+interface JsonRpcRequest {
+  jsonrpc: "2.0";
+  method: string;
+  params?: Record<string, unknown>;
+  id?: number | string | null;
+}
+
+interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: number | string | null;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}
+
+function parseJsonRpcRequest(rawJson: string): JsonRpcRequest {
+  let msg: unknown;
+  try {
+    msg = JSON.parse(rawJson);
+  } catch (e) {
+    throw new Error(`Invalid JSON: ${e}`);
+  }
+
+  if (typeof msg !== "object" || msg === null || Array.isArray(msg)) {
+    throw new Error("Request must be a JSON object");
+  }
+
+  const obj = msg as Record<string, unknown>;
+  if (obj.jsonrpc !== "2.0") {
+    throw new Error("Missing or invalid 'jsonrpc' field (must be '2.0')");
+  }
+  if (!("method" in obj) || typeof obj.method !== "string") {
+    throw new Error("Missing 'method' field");
+  }
+
+  return obj as unknown as JsonRpcRequest;
+}
+
+function buildJsonRpcResponse(requestId: number | string | null, result: unknown): JsonRpcResponse {
+  return { jsonrpc: "2.0", id: requestId, result };
+}
+
+function buildJsonRpcError(requestId: number | string | null, code: number, message: string, data?: unknown): JsonRpcResponse {
+  const err: { code: number; message: string; data?: unknown } = { code, message };
+  if (data !== undefined) {
+    err.data = data;
+  }
+  return { jsonrpc: "2.0", id: requestId, error: err };
+}
+
+async function processJsonRpc(rawJson: string): Promise<string> {
+  // --- Parse ---------------------------------------------------------------
+  let msg: JsonRpcRequest;
+  try {
+    msg = parseJsonRpcRequest(rawJson);
+  } catch (e) {
+    return JSON.stringify(buildJsonRpcError(null, -32700, `Parse error: ${e}`));
+  }
+
+  const requestId = msg.id ?? null; // null for notifications
+  const method = msg.method;
+  const params = (msg.params ?? {}) as Record<string, unknown>;
+  const isNotification = !("id" in msg);
+
+  // --- Notifications must never receive a response (JSON-RPC 2.0 §4.1) ----
+  if (isNotification) {
+    // Even unknown notification methods are silently ignored per spec.
+    return "";
+  }
+
+  // --- Route ---------------------------------------------------------------
+  let result: unknown;
+  try {
+    if (method === "initialize") {
+      result = {
+        protocolVersion: "2025-06-18",
+        capabilities: {
+          tools: { listChanged: true },
+          extensions: SERVICE_MANIFEST.supported_extensions,
+        },
+        serverInfo: {
+          name: SERVICE_MANIFEST.server.name,
+          version: SERVICE_MANIFEST.server.version,
+        },
+      };
+
+    } else if (method === "notifications/initialized") {
+      // Defined as notification-only; if sent as a request, return an error.
+      return JSON.stringify(buildJsonRpcError(
+        requestId, -32600,
+        "notifications/initialized must be sent as a notification (no id)"));
+
+    } else if (method === "tools/list") {
+      result = { tools: SERVICE_MANIFEST.tools };
+
+    } else if (method === "tools/call") {
+      const toolName = params.name as string;
+      const args = (params.arguments ?? {}) as Record<string, string>;
+
+      // Build the internal request dict expected by handleRequest()
+      const internalRequest: MCPRequest = {
+        tool: toolName,
+        parameters: args,
+      };
+      // Forward optional extension fields.
+      // SECURITY NOTE: user_confirmed is a trust-the-client field. In
+      // production the confirmation flow should be enforced by the MCP
+      // host, not trusted from the wire.
+      for (const key of ["idempotency_key", "transaction_id", "intent", "session_state", "user_confirmed"] as const) {
+        if (key in params) {
+          (internalRequest as unknown as Record<string, unknown>)[key] = params[key];
+        }
+      }
+
+      // Application-level errors stay inside "result", not JSON-RPC "error"
+      result = await handleRequest(internalRequest);
+
+    } else {
+      // Unknown method
+      return JSON.stringify(buildJsonRpcError(requestId, -32601, `Method not found: ${method}`));
+    }
+
+  } catch (e) {
+    return JSON.stringify(buildJsonRpcError(requestId, -32603, `Internal error: ${e}`));
+  }
+
+  // --- Respond -------------------------------------------------------------
+  return JSON.stringify(buildJsonRpcResponse(requestId, result));
+}
+
+function buildJsonRpcRequest(method: string, params?: Record<string, unknown>, requestId?: number, isNotification?: boolean): string {
+  const msg: Record<string, unknown> = { jsonrpc: "2.0", method };
+  if (params !== undefined) {
+    msg.params = params;
+  }
+  if (!isNotification) {
+    msg.id = requestId ?? null;
+  }
+  return JSON.stringify(msg);
+}
+
+// =============================================================================
 // Extension 14: Session State
 // =============================================================================
 
@@ -607,110 +751,151 @@ async function handleRequest(request: MCPRequest): Promise<Record<string, unknow
 // =============================================================================
 
 async function demo() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-
   console.log("=".repeat(70));
   console.log("MCP Extended Server — TypeScript Reference Implementation Demo");
   console.log("=".repeat(70));
 
-  // 1. Service Manifest
-  log("1. Service Manifest (Proposal #1)");
-  const manifest = await handleRequest({ tool: "get_manifest" });
+  // Auto-incrementing JSON-RPC request ID counter
+  let nextIdCounter = 0;
+  function nextId(): number {
+    return ++nextIdCounter;
+  }
+
+  async function callTool(name: string, args?: Record<string, unknown>, extra?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const params: Record<string, unknown> = { name };
+    if (args !== undefined) {
+      params.arguments = args;
+    }
+    if (extra) {
+      Object.assign(params, extra);
+    }
+    const reqId = nextId();
+    const rawRequest = buildJsonRpcRequest("tools/call", params, reqId);
+    console.log(`\n  >> Request:  ${JSON.stringify(JSON.parse(rawRequest), null, 2)}`);
+    const rawResponse = await processJsonRpc(rawRequest);
+    const parsed = JSON.parse(rawResponse);
+    console.log(`  << Response: ${JSON.stringify(parsed, null, 2)}`);
+    return parsed.result ?? parsed;
+  }
+
+  // ----- 0. Initialize handshake -------------------------------------------
+  console.log("\n--- 0. JSON-RPC Initialize ---");
+  const initReqId = nextId();
+  const rawReq = buildJsonRpcRequest("initialize", {}, initReqId);
+  console.log(`\n  >> Request:  ${JSON.stringify(JSON.parse(rawReq), null, 2)}`);
+  const rawResp = await processJsonRpc(rawReq);
+  console.log(`  << Response: ${JSON.stringify(JSON.parse(rawResp), null, 2)}`);
+
+  // Send initialized notification (no response expected)
+  const notif = buildJsonRpcRequest("notifications/initialized", undefined, undefined, true);
+  console.log(`\n  >> Notification: ${JSON.stringify(JSON.parse(notif), null, 2)}`);
+  await processJsonRpc(notif);
+  console.log(`  << (no response for notification)`);
+
+  // 1. Service Manifest (Proposal #1)
+  console.log("\n--- 1. Service Manifest ---");
+  const manifest = await callTool("get_manifest");
   const srv = manifest.server as { name: string; version: string };
   console.log(`Server: ${srv.name} v${srv.version}`);
   console.log(`Extensions: ${(manifest.supported_extensions as readonly string[]).join(", ")}`);
+  console.log(`Tools: ${(manifest.tools as Array<{ name: string }>).map((t) => t.name).join(", ")}`);
 
-  // 2. Permission Check
-  log("2. Permission Check (Proposal #4)");
-  const check = await handleRequest({ tool: "check_permissions", parameters: { tool: "delete_ticket" } });
+  // 2. Permission Check (Proposal #4)
+  console.log("\n--- 2. Permission Check ---");
+  const check = await callTool("check_permissions", { tool: "delete_ticket" });
   console.log("Can delete tickets?", check);
 
-  // 3. Intent Hints
-  log("3. Search with Intent Hint (Proposal #2)");
-  const intentResult = await handleRequest({
-    tool: "search_tickets",
-    parameters: { query: "bug" },
-    intent: "Find the most recent incident from last Friday's deployment",
-  });
-  console.log("Suggestion:", intentResult.suggestion);
+  // 3. Search with Intent Hint (Proposal #2)
+  console.log("\n--- 3. Search with Intent Hint ---");
+  const intentResult = await callTool(
+    "search_tickets",
+    { query: "bug" },
+    { intent: "Find the most recent incident from last Friday's deployment" },
+  );
+  console.log(`Intent-based suggestion: ${intentResult.suggestion ? JSON.stringify(intentResult.suggestion) : "none"}`);
 
-  // 4. Provenance
-  log("4. Search with Provenance (Proposal #7)");
-  const provResult = await handleRequest({ tool: "search_tickets", parameters: { status: "open" } });
+  // 4. Search with Provenance (Proposal #7)
+  console.log("\n--- 4. Search with Provenance ---");
+  const provResult = await callTool("search_tickets", { status: "open" });
   const provWrapped = provResult as unknown as ProvenanceWrapped<{ total_count: number }>;
   console.log(`Found ${provWrapped.result?.total_count} tickets`);
   console.log("Provenance:", provWrapped.provenance);
 
-  // 5. Idempotency
-  log("5. Idempotent Create (Proposal #5)");
+  // 5. Idempotent Create (Proposal #5)
+  console.log("\n--- 5. Idempotent Create ---");
   const idemKey = "create-deploy-ticket-2026-03-15";
-  const r1 = await handleRequest({
-    tool: "create_ticket",
-    parameters: { title: "Deploy v2.1", assignee: "charlie" },
-    idempotency_key: idemKey,
-  });
-  console.log(`First call — replay: ${r1.idempotency?.was_replay}`);
+  const r1 = await callTool(
+    "create_ticket",
+    { title: "Deploy v2.1", assignee: "charlie" },
+    { idempotency_key: idemKey },
+  );
+  console.log(`First call — replay: ${(r1 as Record<string, unknown> & { idempotency?: { was_replay: boolean } }).idempotency?.was_replay}`);
 
-  const r2 = await handleRequest({
-    tool: "create_ticket",
-    parameters: { title: "Deploy v2.1", assignee: "charlie" },
-    idempotency_key: idemKey,
-  });
-  console.log(`Second call — replay: ${r2.idempotency?.was_replay}`);
+  const r2 = await callTool(
+    "create_ticket",
+    { title: "Deploy v2.1", assignee: "charlie" },
+    { idempotency_key: idemKey },
+  );
+  console.log(`Second call — replay: ${(r2 as Record<string, unknown> & { idempotency?: { was_replay: boolean } }).idempotency?.was_replay}`);
 
-  // 6. Human-in-the-Loop
-  log("6. Human-in-the-Loop (Proposal #6)");
+  // 6. Human-in-the-Loop (Proposal #6)
+  console.log("\n--- 6. Human-in-the-Loop ---");
   // Temporarily grant delete scope to demonstrate confirmation flow
   permissions.addScope("delete:tickets");
 
-  const noConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" } }) as unknown as ConfirmationResponse;
+  const noConfirm = await callTool("delete_ticket", { ticket_id: "PROJ-2" }) as unknown as ConfirmationResponse;
   console.log(`Requires confirmation: ${noConfirm.requires_confirmation}`);
   console.log(`Message: ${noConfirm.confirmation_message}`);
   console.log(`Risk level: ${noConfirm.risk_level}`);
 
-  const withConfirm = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-2" }, user_confirmed: true }) as unknown as DeleteResponse;
+  const withConfirm = await callTool("delete_ticket", { ticket_id: "PROJ-2" }, { user_confirmed: true }) as unknown as DeleteResponse;
   console.log(`After confirmation: deleted=${withConfirm.deleted}, ticket=${withConfirm.ticket_id}`);
 
   // Revoke delete scope
   permissions.removeScope("delete:tickets");
 
-  // 7. Transaction + Rollback
-  log("7. Transaction with Rollback (Proposal #5)");
+  // 7. Transaction with Rollback (Proposal #5)
+  console.log("\n--- 7. Transaction with Rollback ---");
   const txId = "tx-migration-001";
-  await handleRequest({ tool: "begin_transaction", parameters: { transaction_id: txId } });
+  await callTool("begin_transaction", { transaction_id: txId });
   console.log(`Transaction ${txId} started`);
 
-  await handleRequest({ tool: "create_ticket", parameters: { title: "Migration step 1" }, transaction_id: txId });
+  await callTool("create_ticket", { title: "Migration step 1" }, { transaction_id: txId });
   console.log("Step 1: ticket created");
 
-  await handleRequest({ tool: "create_ticket", parameters: { title: "Migration step 2" }, transaction_id: txId });
+  await callTool("create_ticket", { title: "Migration step 2" }, { transaction_id: txId });
   console.log("Step 2: ticket created");
 
-  const rollback = await handleRequest({ tool: "rollback_transaction", parameters: { transaction_id: txId } });
-  console.log("Rollback result:", JSON.stringify(rollback, null, 2));
+  const rollback = await callTool("rollback_transaction", { transaction_id: txId });
+  console.log(`Rollback result: ${JSON.stringify(rollback, null, 2)}`);
 
-  // 8. Session State
-  log("8. Session State (Proposal #14)");
-  const stateResult = await handleRequest({ tool: "search_tickets", parameters: { status: "open" } });
+  // 8. Session State (Proposal #14)
+  console.log("\n--- 8. Session State ---");
+  const stateResult = await callTool("search_tickets", { status: "open" });
   const decoded = SessionState.decode(stateResult.session_state as string);
   console.log("Session state:", decoded);
 
   // 9. Structured Error (resource not found)
-  log("9. Structured Error (Proposal #11)");
+  console.log("\n--- 9. Structured Error ---");
   permissions.addScope("delete:tickets");
-  const errorResult = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "NONEXISTENT" }, user_confirmed: true });
-  console.log("Error:", JSON.stringify(errorResult, null, 2));
+  const errorResult = await callTool("delete_ticket", { ticket_id: "NONEXISTENT" }, { user_confirmed: true });
+  console.log(`Error: ${JSON.stringify(errorResult, null, 2)}`);
   permissions.removeScope("delete:tickets");
 
   // 10. Permission Denied Error
-  log("10. Permission Denied (Proposals #4 + #11)");
-  const permError = await handleRequest({ tool: "delete_ticket", parameters: { ticket_id: "PROJ-3" }, user_confirmed: true });
-  console.log("Error:", JSON.stringify(permError, null, 2));
+  console.log("\n--- 10. Permission Denied (Proposals #4 + #11) ---");
+  const permError = await callTool("delete_ticket", { ticket_id: "PROJ-3" }, { user_confirmed: true });
+  console.log(`Error: ${JSON.stringify(permError, null, 2)}`);
 
   console.log("\n" + "=".repeat(70));
   console.log("Demo complete (core extensions).");
 
-  // Additional proposal demos
+  // Additional proposal demos — these are standalone simulations that
+  // demonstrate extension concepts (data references, multimodal, discovery,
+  // subscriptions) without routing through the JSON-RPC layer, because the
+  // features they illustrate (server-to-server data passing, registry queries,
+  // event subscriptions) operate outside the single-server request/response
+  // flow.  The conformance check does route through JSON-RPC.
   await demoDataReferences();
   await demoMultimodalSignatures();
   await demoConformanceCheck();
@@ -721,13 +906,17 @@ async function demo() {
   console.log("All demos complete.");
 }
 
+// Helper used by standalone demo functions below
+function logSection(title: string): void {
+  console.log(`\n--- ${title} ---`);
+}
+
 // =============================================================================
 // Extension 9: Data References
 // =============================================================================
 
 async function demoDataReferences() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-  log("11. Data References (Proposal #9)");
+  logSection("11. Data References (Proposal #9)");
 
   // Server A exports data and returns a reference
   async function serverAExport(_dataset: string) {
@@ -772,8 +961,7 @@ async function demoDataReferences() {
 // =============================================================================
 
 async function demoMultimodalSignatures() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-  log("12. Multimodal Tool Signatures (Proposal #10)");
+  logSection("12. Multimodal Tool Signatures (Proposal #10)");
 
   // Define a tool with explicit input/output type annotations
   const toolDefinition = {
@@ -829,44 +1017,67 @@ async function demoMultimodalSignatures() {
 // =============================================================================
 
 async function demoConformanceCheck() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-  log("13. Conformance Check (Proposal #12)");
+  logSection("13. Conformance Check (Proposal #12)");
 
-  // Define a mini test suite
+  // Define a mini test suite — each test uses JSON-RPC via processJsonRpc()
+  let confIdCounter = 0;
+  function confId(): number {
+    return 1000 + ++confIdCounter;
+  }
+
   const testSuite = [
     {
       test_id: "CONF-001",
       description: "Server returns a valid manifest on get_manifest",
-      request: { tool: "get_manifest" } as MCPRequest,
-      expected: (r: Record<string, unknown>) => "server" in r && "tools" in r,
+      request: buildJsonRpcRequest("tools/call", { name: "get_manifest", arguments: {} }, confId()),
+      expected: (r: Record<string, unknown>) => "result" in r && typeof r.result === "object" && r.result !== null && "server" in (r.result as Record<string, unknown>) && "tools" in (r.result as Record<string, unknown>),
     },
     {
       test_id: "CONF-002",
       description: "Permission check returns allowed=True for granted scope",
-      request: { tool: "check_permissions", parameters: { tool: "search_tickets" } } as MCPRequest,
-      expected: (r: Record<string, unknown>) => r.allowed === true,
+      request: buildJsonRpcRequest("tools/call", { name: "check_permissions", arguments: { tool: "search_tickets" } }, confId()),
+      expected: (r: Record<string, unknown>) => "result" in r && (r.result as Record<string, unknown>)?.allowed === true,
     },
     {
       test_id: "CONF-003",
       description: "Permission check returns allowed=False for missing scope",
-      request: { tool: "check_permissions", parameters: { tool: "delete_ticket" } } as MCPRequest,
-      expected: (r: Record<string, unknown>) => r.allowed === false,
+      request: buildJsonRpcRequest("tools/call", { name: "check_permissions", arguments: { tool: "delete_ticket" } }, confId()),
+      expected: (r: Record<string, unknown>) => "result" in r && (r.result as Record<string, unknown>)?.allowed === false,
     },
     {
       test_id: "CONF-004",
       description: "Structured error returned for unknown tool",
-      request: { tool: "nonexistent_tool", parameters: {} } as MCPRequest,
-      expected: (r: Record<string, unknown>) => "error" in r,
+      request: buildJsonRpcRequest("tools/call", { name: "nonexistent_tool", arguments: {} }, confId()),
+      expected: (r: Record<string, unknown>) => "result" in r && typeof r.result === "object" && r.result !== null && "error" in (r.result as Record<string, unknown>),
+    },
+    {
+      test_id: "CONF-005",
+      description: "tools/list returns tool array",
+      request: buildJsonRpcRequest("tools/list", undefined, confId()),
+      expected: (r: Record<string, unknown>) => "result" in r && typeof r.result === "object" && r.result !== null && "tools" in (r.result as Record<string, unknown>) && Array.isArray((r.result as Record<string, unknown>).tools),
+    },
+    {
+      test_id: "CONF-006",
+      description: "Unknown method returns -32601 error",
+      request: buildJsonRpcRequest("nonexistent/method", undefined, confId()),
+      expected: (r: Record<string, unknown>) => "error" in r && (r.error as Record<string, unknown>)?.code === -32601,
+    },
+    {
+      test_id: "CONF-007",
+      description: "Invalid JSON returns -32700 parse error",
+      request: "this is not valid json{{{",
+      expected: (r: Record<string, unknown>) => "error" in r && (r.error as Record<string, unknown>)?.code === -32700,
     },
   ];
 
-  // Run tests against the mock server
+  // Run tests against the server via JSON-RPC
   let passed = 0;
   let failed = 0;
   const results: { test_id: string; status: string; description: string }[] = [];
 
   for (const test of testSuite) {
-    const response = await handleRequest(test.request);
+    const rawResponse = await processJsonRpc(test.request);
+    const response = JSON.parse(rawResponse);
     const success = test.expected(response);
     const status = success ? "PASSED" : "FAILED";
     if (success) passed++;
@@ -894,8 +1105,7 @@ async function demoConformanceCheck() {
 // =============================================================================
 
 async function demoServerDiscovery() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-  log("14. Server Discovery (Proposal #13)");
+  logSection("14. Server Discovery (Proposal #13)");
 
   // Simulated registry of known servers
   const registry = [
@@ -965,8 +1175,7 @@ async function demoServerDiscovery() {
 // =============================================================================
 
 async function demoSubscription() {
-  const log = (title: string) => console.log(`\n--- ${title} ---`);
-  log("15. Event Subscriptions (Proposal #15)");
+  logSection("15. Event Subscriptions (Proposal #15)");
 
   // In-memory subscription manager
   const subscriptions = new Map<string, { subscription_id: string; events: string[]; filter: Record<string, string>; created_at: string; status: string }>();
@@ -1040,4 +1249,4 @@ async function demoSubscription() {
   console.log(`Unsubscribed: ${unsub.subscription_id}, status=${unsub.status}`);
 }
 
-demo().catch(console.error);
+demo().catch((e) => { console.error(e); process.exit(1); });

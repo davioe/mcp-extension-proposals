@@ -50,12 +50,22 @@ All 15 proposals now have schemas and reference implementations. Areas where con
 To validate all manifests and schemas locally:
 
 ```bash
+npm install          # first time only — installs ajv and other dev tooling
 node scripts/validate-schemas.js
 ```
 
-This checks that all example manifests conform to the service manifest schema and that all schemas are valid JSON Schema 2020-12.
+The validation script uses [ajv](https://ajv.js.org/) for full JSON Schema 2020-12 validation:
+- **Meta-validation**: all schemas compile successfully (catches invalid `$ref`, malformed `$defs`, etc.)
+- **Instance validation**: all example manifests validate against `service-manifest.schema.json`, including `format` assertions (`uri`, `date-time`)
 
-CI runs this validation automatically on every push and pull request via GitHub Actions.
+You can also run the reference implementations to verify they work:
+
+```bash
+python examples/python/server.py
+npx tsx examples/typescript/server.ts
+```
+
+CI runs all three checks automatically on every push and pull request via GitHub Actions.
 
 ## License
 

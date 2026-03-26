@@ -336,6 +336,130 @@ def structured_error(
 
 
 # =============================================================================
+# JSON-RPC 2.0 Wire Format
+# =============================================================================
+
+def parse_jsonrpc_request(raw_json: str) -> dict:
+    """Parse and validate a JSON-RPC 2.0 request envelope."""
+    try:
+        msg = json.loads(raw_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"Invalid JSON: {exc}")
+
+    if not isinstance(msg, dict):
+        raise ValueError("Request must be a JSON object")
+    if msg.get("jsonrpc") != "2.0":
+        raise ValueError("Missing or invalid 'jsonrpc' field (must be '2.0')")
+    if "method" not in msg:
+        raise ValueError("Missing 'method' field")
+
+    return msg
+
+
+def build_jsonrpc_response(request_id, result) -> dict:
+    """Build a JSON-RPC 2.0 success response envelope."""
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def build_jsonrpc_error(request_id, code: int, message: str, data=None) -> dict:
+    """Build a JSON-RPC 2.0 error response envelope."""
+    err = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return {"jsonrpc": "2.0", "id": request_id, "error": err}
+
+
+async def process_jsonrpc(raw_json: str) -> str:
+    """Top-level JSON-RPC 2.0 entry point.
+
+    Parses the envelope, routes by method, and returns the JSON-encoded
+    response string.  Notifications (no ``id``) return an empty string.
+    """
+    # --- Parse ---------------------------------------------------------------
+    try:
+        msg = parse_jsonrpc_request(raw_json)
+    except ValueError as exc:
+        return json.dumps(build_jsonrpc_error(None, -32700, f"Parse error: {exc}"))
+
+    request_id = msg.get("id")  # None for notifications
+    method = msg["method"]
+    params = msg.get("params", {})
+    is_notification = "id" not in msg
+
+    # --- Notifications must never receive a response (JSON-RPC 2.0 §4.1) ----
+    if is_notification:
+        # Even unknown notification methods are silently ignored per spec.
+        return ""
+
+    # --- Route ---------------------------------------------------------------
+    try:
+        if method == "initialize":
+            result = {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {
+                    "tools": {"listChanged": True},
+                    "extensions": SERVICE_MANIFEST.get("supported_extensions", []),
+                },
+                "serverInfo": {
+                    "name": SERVICE_MANIFEST["server"]["name"],
+                    "version": SERVICE_MANIFEST["server"]["version"],
+                },
+            }
+
+        elif method == "notifications/initialized":
+            # Defined as notification-only; if sent as a request, return an error.
+            return json.dumps(build_jsonrpc_error(
+                request_id, -32600,
+                "notifications/initialized must be sent as a notification (no id)"))
+
+        elif method == "tools/list":
+            result = {"tools": SERVICE_MANIFEST["tools"]}
+
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+
+            # Build the internal request dict expected by handle_request()
+            internal_request: dict[str, Any] = {
+                "tool": tool_name,
+                "parameters": arguments,
+            }
+            # Forward optional extension fields.
+            # SECURITY NOTE: user_confirmed is a trust-the-client field. In
+            # production the confirmation flow should be enforced by the MCP
+            # host, not trusted from the wire.
+            for key in ("idempotency_key", "transaction_id", "intent",
+                        "session_state", "user_confirmed"):
+                if key in params:
+                    internal_request[key] = params[key]
+
+            # Application-level errors stay inside "result", not JSON-RPC "error"
+            result = await handle_request(internal_request)
+
+        else:
+            # Unknown method
+            return json.dumps(build_jsonrpc_error(
+                request_id, -32601, f"Method not found: {method}"))
+
+    except Exception as exc:
+        return json.dumps(build_jsonrpc_error(
+            request_id, -32603, f"Internal error: {exc}"))
+
+    # --- Respond -------------------------------------------------------------
+    return json.dumps(build_jsonrpc_response(request_id, result))
+
+
+def build_jsonrpc_request(method: str, params=None, request_id=None, is_notification: bool = False) -> str:
+    """Build a JSON-RPC 2.0 request string (helper for demos)."""
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+    if params is not None:
+        msg["params"] = params
+    if not is_notification:
+        msg["id"] = request_id
+    return json.dumps(msg)
+
+
+# =============================================================================
 # Extension 7: Provenance Helper
 # =============================================================================
 
@@ -641,51 +765,84 @@ async def demo():
     print("MCP Extended Server — Python Reference Implementation Demo")
     print("=" * 70)
 
+    # Auto-incrementing JSON-RPC request ID counter
+    _next_id = 0
+
+    def next_id() -> int:
+        nonlocal _next_id
+        _next_id += 1
+        return _next_id
+
+    async def call_tool(name: str, arguments=None, **extra) -> dict:
+        """Build a tools/call JSON-RPC envelope, send it, and return the result."""
+        params: dict[str, Any] = {"name": name}
+        if arguments is not None:
+            params["arguments"] = arguments
+        params.update(extra)
+        req_id = next_id()
+        raw_request = build_jsonrpc_request("tools/call", params=params, request_id=req_id)
+        print(f"\n  >> Request:  {json.dumps(json.loads(raw_request), indent=2)}")
+        raw_response = await process_jsonrpc(raw_request)
+        parsed = json.loads(raw_response)
+        print(f"  << Response: {json.dumps(parsed, indent=2)}")
+        return parsed.get("result", parsed)
+
+    # ----- 0. Initialize handshake -------------------------------------------
+    print("\n--- 0. JSON-RPC Initialize ---")
+    req_id = next_id()
+    raw_req = build_jsonrpc_request("initialize", params={}, request_id=req_id)
+    print(f"\n  >> Request:  {json.dumps(json.loads(raw_req), indent=2)}")
+    raw_resp = await process_jsonrpc(raw_req)
+    print(f"  << Response: {json.dumps(json.loads(raw_resp), indent=2)}")
+
+    # Send initialized notification (no response expected)
+    notif = build_jsonrpc_request("notifications/initialized", is_notification=True)
+    print(f"\n  >> Notification: {json.dumps(json.loads(notif), indent=2)}")
+    resp = await process_jsonrpc(notif)
+    print(f"  << (no response for notification)")
+
     # 1. Service Manifest (Proposal #1)
     print("\n--- 1. Service Manifest ---")
-    manifest = await handle_request({"tool": "get_manifest"})
+    manifest = await call_tool("get_manifest")
     print(f"Server: {manifest['server']['name']} v{manifest['server']['version']}")
     print(f"Extensions: {', '.join(manifest['supported_extensions'])}")
     print(f"Tools: {', '.join(t['name'] for t in manifest['tools'])}")
 
     # 2. Permission Check (Proposal #4)
     print("\n--- 2. Permission Check ---")
-    check = await handle_request({"tool": "check_permissions", "parameters": {"tool": "delete_ticket"}})
+    check = await call_tool("check_permissions", arguments={"tool": "delete_ticket"})
     print(f"Can delete tickets? {check}")
 
     # 3. Search with Intent Hint (Proposal #2)
     print("\n--- 3. Search with Intent Hint ---")
-    result = await handle_request({
-        "tool": "search_tickets",
-        "parameters": {"query": "bug"},
-        "intent": "Find the most recent incident from last Friday's deployment",
-    })
+    result = await call_tool(
+        "search_tickets",
+        arguments={"query": "bug"},
+        intent="Find the most recent incident from last Friday's deployment",
+    )
     print(f"Intent-based suggestion: {result.get('suggestion', 'none')}")
 
     # 4. Search with Provenance (Proposal #7)
     print("\n--- 4. Search with Provenance ---")
-    result = await handle_request({
-        "tool": "search_tickets",
-        "parameters": {"status": "open"},
-    })
+    result = await call_tool("search_tickets", arguments={"status": "open"})
     print(f"Found {result['result']['total_count']} tickets")
     print(f"Provenance: {result['provenance']}")
 
     # 5. Idempotent Create (Proposal #5)
     print("\n--- 5. Idempotent Create ---")
     idem_key = "create-deploy-ticket-2026-03-15"
-    result1 = await handle_request({
-        "tool": "create_ticket",
-        "parameters": {"title": "Deploy v2.1", "assignee": "charlie"},
-        "idempotency_key": idem_key,
-    })
+    result1 = await call_tool(
+        "create_ticket",
+        arguments={"title": "Deploy v2.1", "assignee": "charlie"},
+        idempotency_key=idem_key,
+    )
     print(f"First call — created: {result1['result']['ticket']['id']}, replay: {result1['idempotency']['was_replay']}")
 
-    result2 = await handle_request({
-        "tool": "create_ticket",
-        "parameters": {"title": "Deploy v2.1", "assignee": "charlie"},
-        "idempotency_key": idem_key,
-    })
+    result2 = await call_tool(
+        "create_ticket",
+        arguments={"title": "Deploy v2.1", "assignee": "charlie"},
+        idempotency_key=idem_key,
+    )
     print(f"Second call — replay: {result2['idempotency']['was_replay']}, same ticket: {result2['result']['ticket']['id']}")
 
     # 6. Human-in-the-Loop (Proposal #6)
@@ -693,20 +850,20 @@ async def demo():
     # Temporarily grant delete scope to demonstrate the confirmation flow
     permissions.granted_scopes.add("delete:tickets")
 
-    result = await handle_request({
-        "tool": "delete_ticket",
-        "parameters": {"ticket_id": "PROJ-2"},
-    })
+    result = await call_tool(
+        "delete_ticket",
+        arguments={"ticket_id": "PROJ-2"},
+    )
     print(f"Requires confirmation: {result.get('requires_confirmation')}")
     print(f"Message: {result.get('confirmation_message')}")
     print(f"Risk level: {result.get('risk_level')}")
 
     # Now with explicit user confirmation
-    result = await handle_request({
-        "tool": "delete_ticket",
-        "parameters": {"ticket_id": "PROJ-2"},
-        "user_confirmed": True,
-    })
+    result = await call_tool(
+        "delete_ticket",
+        arguments={"ticket_id": "PROJ-2"},
+        user_confirmed=True,
+    )
     print(f"After confirmation: deleted={result.get('deleted')}, ticket={result.get('ticket_id')}")
 
     # Revoke delete scope again
@@ -715,36 +872,30 @@ async def demo():
     # 7. Transaction with Rollback (Proposal #5)
     print("\n--- 7. Transaction with Rollback ---")
     tx_id = "tx-migration-001"
-    await handle_request({"tool": "begin_transaction", "parameters": {"transaction_id": tx_id}})
+    await call_tool("begin_transaction", arguments={"transaction_id": tx_id})
     print(f"Transaction {tx_id} started")
 
-    await handle_request({
-        "tool": "create_ticket",
-        "parameters": {"title": "Migration step 1"},
-        "transaction_id": tx_id,
-    })
+    await call_tool(
+        "create_ticket",
+        arguments={"title": "Migration step 1"},
+        transaction_id=tx_id,
+    )
     print("Step 1: ticket created")
 
-    await handle_request({
-        "tool": "create_ticket",
-        "parameters": {"title": "Migration step 2"},
-        "transaction_id": tx_id,
-    })
+    await call_tool(
+        "create_ticket",
+        arguments={"title": "Migration step 2"},
+        transaction_id=tx_id,
+    )
     print("Step 2: ticket created")
 
     # Simulate failure — rollback
-    rollback = await handle_request({
-        "tool": "rollback_transaction",
-        "parameters": {"transaction_id": tx_id},
-    })
+    rollback = await call_tool("rollback_transaction", arguments={"transaction_id": tx_id})
     print(f"Rollback result: {rollback}")
 
     # 8. Session State (Proposal #14)
     print("\n--- 8. Session State ---")
-    result = await handle_request({
-        "tool": "search_tickets",
-        "parameters": {"status": "open"},
-    })
+    result = await call_tool("search_tickets", arguments={"status": "open"})
     state_token = result.get("session_state")
     decoded = SessionStateManager.decode(state_token)
     print(f"Session state: {decoded}")
@@ -753,27 +904,32 @@ async def demo():
     print("\n--- 9. Structured Error ---")
     # Grant delete scope temporarily to get past permission check and show the actual error
     permissions.granted_scopes.add("delete:tickets")
-    result = await handle_request({
-        "tool": "delete_ticket",
-        "parameters": {"ticket_id": "NONEXISTENT"},
-        "user_confirmed": True,
-    })
+    result = await call_tool(
+        "delete_ticket",
+        arguments={"ticket_id": "NONEXISTENT"},
+        user_confirmed=True,
+    )
     print(f"Error: {json.dumps(result, indent=2)}")
     permissions.granted_scopes.discard("delete:tickets")
 
     # 10. Permission Denied Error (Proposal #4 + #11 combined)
     print("\n--- 10. Permission Denied (Proposals #4 + #11) ---")
-    result = await handle_request({
-        "tool": "delete_ticket",
-        "parameters": {"ticket_id": "PROJ-3"},
-        "user_confirmed": True,
-    })
+    result = await call_tool(
+        "delete_ticket",
+        arguments={"ticket_id": "PROJ-3"},
+        user_confirmed=True,
+    )
     print(f"Error: {json.dumps(result, indent=2)}")
 
     print("\n" + "=" * 70)
     print("Demo complete (core extensions).")
 
-    # Additional proposal demos
+    # Additional proposal demos — these are standalone simulations that
+    # demonstrate extension concepts (data references, multimodal, discovery,
+    # subscriptions) without routing through the JSON-RPC layer, because the
+    # features they illustrate (server-to-server data passing, registry queries,
+    # event subscriptions) operate outside the single-server request/response
+    # flow.  The conformance check does route through JSON-RPC.
     await demo_data_references()
     await demo_multimodal_signatures()
     await demo_conformance_check()
@@ -898,41 +1054,67 @@ async def demo_conformance_check():
     """Demonstrate a conformance test suite (Proposal #12)."""
     print("\n--- 13. Conformance Check (Proposal #12) ---")
 
-    # Define a mini test suite
+    # Define a mini test suite — each test uses JSON-RPC via process_jsonrpc()
+    _conf_id = 0
+
+    def conf_id() -> int:
+        nonlocal _conf_id
+        _conf_id += 1
+        return 1000 + _conf_id
+
     test_suite = [
         {
             "test_id": "CONF-001",
             "description": "Server returns a valid manifest on get_manifest",
-            "request": {"tool": "get_manifest"},
-            "expected": lambda r: "server" in r and "tools" in r,
+            "request": build_jsonrpc_request("tools/call", params={"name": "get_manifest", "arguments": {}}, request_id=conf_id()),
+            "expected": lambda r: "result" in r and "server" in r["result"] and "tools" in r["result"],
         },
         {
             "test_id": "CONF-002",
             "description": "Permission check returns allowed=True for granted scope",
-            "request": {"tool": "check_permissions", "parameters": {"tool": "search_tickets"}},
-            "expected": lambda r: r.get("allowed") is True,
+            "request": build_jsonrpc_request("tools/call", params={"name": "check_permissions", "arguments": {"tool": "search_tickets"}}, request_id=conf_id()),
+            "expected": lambda r: "result" in r and r["result"].get("allowed") is True,
         },
         {
             "test_id": "CONF-003",
             "description": "Permission check returns allowed=False for missing scope",
-            "request": {"tool": "check_permissions", "parameters": {"tool": "delete_ticket"}},
-            "expected": lambda r: r.get("allowed") is False,
+            "request": build_jsonrpc_request("tools/call", params={"name": "check_permissions", "arguments": {"tool": "delete_ticket"}}, request_id=conf_id()),
+            "expected": lambda r: "result" in r and r["result"].get("allowed") is False,
         },
         {
             "test_id": "CONF-004",
             "description": "Structured error returned for unknown tool",
-            "request": {"tool": "nonexistent_tool", "parameters": {}},
-            "expected": lambda r: "error" in r and r["error"]["code"] == "SCOPE_INSUFFICIENT" or "error" in r,
+            "request": build_jsonrpc_request("tools/call", params={"name": "nonexistent_tool", "arguments": {}}, request_id=conf_id()),
+            "expected": lambda r: "result" in r and "error" in r["result"],
+        },
+        {
+            "test_id": "CONF-005",
+            "description": "tools/list returns tool array",
+            "request": build_jsonrpc_request("tools/list", request_id=conf_id()),
+            "expected": lambda r: "result" in r and "tools" in r["result"] and len(r["result"]["tools"]) > 0,
+        },
+        {
+            "test_id": "CONF-006",
+            "description": "Unknown method returns -32601 error",
+            "request": build_jsonrpc_request("nonexistent/method", request_id=conf_id()),
+            "expected": lambda r: "error" in r and r["error"]["code"] == -32601,
+        },
+        {
+            "test_id": "CONF-007",
+            "description": "Invalid JSON returns -32700 parse error",
+            "request": "this is not valid json{{{",
+            "expected": lambda r: "error" in r and r["error"]["code"] == -32700,
         },
     ]
 
-    # Run tests against the mock server
+    # Run tests against the server via JSON-RPC
     passed = 0
     failed = 0
     results = []
 
     for test in test_suite:
-        response = await handle_request(test["request"])
+        raw_response = await process_jsonrpc(test["request"])
+        response = json.loads(raw_response)
         success = test["expected"](response)
         status = "PASSED" if success else "FAILED"
         if success:

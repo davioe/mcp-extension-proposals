@@ -10,22 +10,26 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
-      - name: Validate JSON files are well-formed
-        run: |
-          echo "Checking all JSON files..."
-          find schemas/ examples/ -name '*.json' -print0 | while IFS= read -r -d '' file; do
-            if ! node -e "JSON.parse(require('fs').readFileSync('$file', 'utf-8'))"; then
-              echo "FAIL: $file is not valid JSON"
-              exit 1
-            fi
-          done
-          echo "All JSON files are well-formed."
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Run schema validation
+      - name: Validate schemas and manifests (ajv)
         run: node scripts/validate-schemas.js
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Python reference implementation
+        run: python examples/python/server.py
+        timeout-minutes: 2
+
+      - name: Run TypeScript reference implementation
+        run: npx tsx examples/typescript/server.ts
+        timeout-minutes: 2
